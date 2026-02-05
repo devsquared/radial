@@ -4,7 +4,7 @@ use jiff::Timestamp;
 use crate::db::Database;
 use crate::helpers::find_similar_id;
 use crate::id::generate_id;
-use crate::models::{Contract, GoalState, Task, TaskMetrics, TaskState};
+use crate::models::{Comment, Contract, GoalState, Task, TaskMetrics, TaskState};
 
 /// Result of completing a task, including any unblocked tasks.
 #[derive(Debug)]
@@ -88,6 +88,7 @@ pub fn create(
         updated_at: now,
         completed_at: None,
         metrics: TaskMetrics::default(),
+        comments: Vec::new(),
     };
 
     db.create_task(&task)?;
@@ -394,4 +395,44 @@ pub fn retry(task_id: String, db: &mut Database) -> Result<Task> {
     // Re-fetch to get updated retry_count
     db.get_task(&task_id)?
         .ok_or_else(|| anyhow!("Task not found after retry"))
+}
+
+pub fn comment(task_id: String, text: String, db: &mut Database) -> Result<Task> {
+    let task = db.get_task(&task_id)?;
+
+    if task.is_none() {
+        let all_task_ids: Vec<String> = db
+            .list_goals()?
+            .iter()
+            .flat_map(|goal| {
+                db.list_tasks(&goal.id)
+                    .unwrap_or_default()
+                    .into_iter()
+                    .map(|t| t.id)
+            })
+            .collect();
+
+        return if let Some(suggestion) = find_similar_id(&task_id, &all_task_ids) {
+            Err(anyhow!(
+                "Task not found: {task_id}\nDid you mean: {suggestion}"
+            ))
+        } else {
+            Err(anyhow!("Task not found: {task_id}"))
+        };
+    }
+
+    let mut task = task.unwrap();
+
+    let comment = Comment {
+        id: generate_id(),
+        text,
+        created_at: Timestamp::now(),
+    };
+
+    task.comments.push(comment);
+    task.updated_at = Timestamp::now();
+
+    db.update_task(&task)?;
+
+    Ok(task)
 }

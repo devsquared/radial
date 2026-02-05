@@ -786,3 +786,194 @@ fn test_json_output_status() {
     assert_eq!(parsed["description"], "Status task");
     assert!(parsed["contract"].is_object());
 }
+
+#[test]
+fn test_task_comments() {
+    let env = TestEnv::new();
+    env.run(&["init"]).expect("Init failed");
+
+    // Create goal and task
+    let output = env
+        .run(&["goal", "create", "Comment test"])
+        .expect("Create goal failed");
+    let goal_id = output
+        .lines()
+        .find(|line| line.contains("Created goal:"))
+        .and_then(|line| line.split_whitespace().nth(2))
+        .unwrap();
+
+    let output = env
+        .run(&[
+            "task",
+            "create",
+            goal_id,
+            "Task with comments",
+            "--receives",
+            "Input",
+            "--produces",
+            "Output",
+            "--verify",
+            "Check",
+        ])
+        .expect("Create task failed");
+    let task_id = output
+        .lines()
+        .find(|line| line.contains("Created task:"))
+        .and_then(|line| line.split_whitespace().nth(2))
+        .unwrap();
+
+    // Add first comment
+    let output = env
+        .run(&["task", "comment", task_id, "First comment on task"])
+        .expect("Add comment failed");
+    assert!(output.contains("Added comment to task"));
+    assert!(output.contains(task_id));
+
+    // Add second comment
+    let output = env
+        .run(&[
+            "task",
+            "comment",
+            task_id,
+            "Second comment with more detail",
+        ])
+        .expect("Add second comment failed");
+    assert!(output.contains("Added comment to task"));
+
+    // Check that status shows comments
+    let output = env
+        .run(&["status", "--task", task_id])
+        .expect("Status failed");
+    assert!(output.contains("Comments:"));
+    assert!(output.contains("First comment on task"));
+    assert!(output.contains("Second comment with more detail"));
+}
+
+#[test]
+fn test_task_comments_concise_flag() {
+    let env = TestEnv::new();
+    env.run(&["init"]).expect("Init failed");
+
+    // Create goal and task
+    let output = env
+        .run(&["goal", "create", "Concise test"])
+        .expect("Create goal failed");
+    let goal_id = output
+        .lines()
+        .find(|line| line.contains("Created goal:"))
+        .and_then(|line| line.split_whitespace().nth(2))
+        .unwrap();
+
+    let output = env
+        .run(&[
+            "task",
+            "create",
+            goal_id,
+            "Task for concise test",
+            "--receives",
+            "Input",
+            "--produces",
+            "Output",
+            "--verify",
+            "Check",
+        ])
+        .expect("Create task failed");
+    let task_id = output
+        .lines()
+        .find(|line| line.contains("Created task:"))
+        .and_then(|line| line.split_whitespace().nth(2))
+        .unwrap();
+
+    // Add a comment
+    env.run(&["task", "comment", task_id, "This comment should be hidden"])
+        .expect("Add comment failed");
+
+    // Without --concise, comments should appear
+    let output = env
+        .run(&["status", "--task", task_id])
+        .expect("Status failed");
+    assert!(output.contains("Comments:"));
+    assert!(output.contains("This comment should be hidden"));
+
+    // With --concise, comments should NOT appear
+    let output = env
+        .run(&["status", "--task", task_id, "--concise"])
+        .expect("Status --concise failed");
+    assert!(!output.contains("Comments:"));
+    assert!(!output.contains("This comment should be hidden"));
+    // But the task info should still be there
+    assert!(output.contains(task_id));
+    assert!(output.contains("Task for concise test"));
+}
+
+#[test]
+fn test_task_comments_json_output() {
+    let env = TestEnv::new();
+    env.run(&["init"]).expect("Init failed");
+
+    // Create goal and task
+    let output = env
+        .run(&["goal", "create", "JSON comment test"])
+        .expect("Create goal failed");
+    let goal_id = output
+        .lines()
+        .find(|line| line.contains("Created goal:"))
+        .and_then(|line| line.split_whitespace().nth(2))
+        .unwrap();
+
+    let output = env
+        .run(&[
+            "task",
+            "create",
+            goal_id,
+            "Task for JSON comment test",
+            "--receives",
+            "Input",
+            "--produces",
+            "Output",
+            "--verify",
+            "Check",
+        ])
+        .expect("Create task failed");
+    let task_id = output
+        .lines()
+        .find(|line| line.contains("Created task:"))
+        .and_then(|line| line.split_whitespace().nth(2))
+        .unwrap();
+
+    // Task should start with empty comments array
+    let output = env
+        .run(&["status", "--task", task_id, "--json"])
+        .expect("Status --json failed");
+    let parsed: Value = serde_json::from_str(&output).expect("Should be valid JSON");
+    assert!(parsed["comments"].is_array());
+    assert_eq!(parsed["comments"].as_array().unwrap().len(), 0);
+
+    // Add comments
+    env.run(&["task", "comment", task_id, "JSON comment one"])
+        .expect("Add comment failed");
+    env.run(&["task", "comment", task_id, "JSON comment two"])
+        .expect("Add second comment failed");
+
+    // Check JSON output includes comments
+    let output = env
+        .run(&["status", "--task", task_id, "--json"])
+        .expect("Status --json failed");
+    let parsed: Value = serde_json::from_str(&output).expect("Should be valid JSON");
+    assert!(parsed["comments"].is_array());
+
+    let comments = parsed["comments"].as_array().unwrap();
+    assert_eq!(comments.len(), 2);
+    assert_eq!(comments[0]["text"], "JSON comment one");
+    assert_eq!(comments[1]["text"], "JSON comment two");
+    assert!(comments[0]["id"].is_string());
+    assert!(comments[0]["created_at"].is_string());
+
+    // JSON output should include comments even with --concise
+    let output = env
+        .run(&["status", "--task", task_id, "--json", "--concise"])
+        .expect("Status --json --concise failed");
+    let parsed: Value = serde_json::from_str(&output).expect("Should be valid JSON");
+    let comments = parsed["comments"].as_array().unwrap();
+    assert_eq!(comments.len(), 2, "JSON should always include comments");
+}
