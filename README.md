@@ -63,11 +63,15 @@ start fails because another agent claimed it, pick a different ready task.
 | `rd goal create <description>` | Create a new goal |
 | `rd goal list` | List all goals |
 | `rd task create <goal-id> <description> [--receives, --produces, --verify, --blocked-by]` | Create a task |
-| `rd task list <goal-id>` | List tasks for a goal |
+| `rd task list <goal-id> [-v\|--verbose]` | List tasks for a goal |
 | `rd task start <task-id>` | Claim a task (atomic) |
-| `rd task complete <task-id> --result <summary>` | Mark task complete |
+| `rd task complete <task-id> --result <summary> [--artifacts]` | Mark task complete |
+| `rd task fail <task-id>` | Mark task as failed |
+| `rd task retry <task-id>` | Retry a failed task |
+| `rd task comment <task-id> <text>` | Add a comment to a task |
 | `rd ready <goal-id>` | List tasks ready to start |
-| `rd status [--goal <id>] [--task <id>]` | Show status |
+| `rd status [--goal <id>] [--task <id>] [--concise]` | Show status |
+| `rd prep` | Output preparation guide for LLM agents |
 
 All commands accept `--json` for machine-readable output.
 
