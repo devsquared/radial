@@ -152,12 +152,21 @@ pub fn run(cli: Cli) -> Result<()> {
                     let task = commands::task::retry(task_id, &mut db)?;
                     Output::new(false).task_retry(&task)
                 }
+                TaskCommands::Comment { task_id, text } => {
+                    let task = commands::task::comment(task_id, text, &mut db)?;
+                    Output::new(false).task_commented(&task)
+                }
             }
         }
-        Commands::Status { goal, task, json } => {
+        Commands::Status {
+            goal,
+            task,
+            json,
+            concise,
+        } => {
             let db = ensure_initialized()?;
             let result = commands::status::run(goal, task, &db)?;
-            Output::new(json).status(&result)
+            Output::with_concise(json, concise).status(&result)
         }
         Commands::Ready { goal_id, json } => {
             let db = ensure_initialized()?;

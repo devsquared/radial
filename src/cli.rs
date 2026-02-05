@@ -38,6 +38,10 @@ pub enum Commands {
         /// Output as JSON
         #[arg(long)]
         json: bool,
+
+        /// Hide comments in output
+        #[arg(long)]
+        concise: bool,
     },
 
     /// Show tasks ready to be worked on
@@ -150,5 +154,14 @@ pub enum TaskCommands {
     Retry {
         /// The task ID to retry
         task_id: String,
+    },
+
+    /// Add a comment to a task
+    Comment {
+        /// The task ID to comment on
+        task_id: String,
+
+        /// The comment text
+        text: String,
     },
 }

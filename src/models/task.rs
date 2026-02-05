@@ -2,7 +2,7 @@ use jiff::Timestamp;
 use serde::{Deserialize, Serialize};
 use strum::{AsRefStr, EnumString};
 
-use super::{Contract, Outcome};
+use super::{Comment, Contract, Outcome};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, AsRefStr, EnumString)]
 #[serde(rename_all = "lowercase")]
@@ -36,4 +36,6 @@ pub struct Task {
     pub updated_at: Timestamp,
     pub completed_at: Option<Timestamp>,
     pub metrics: TaskMetrics,
+    #[serde(default)]
+    pub comments: Vec<Comment>,
 }

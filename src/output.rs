@@ -9,6 +9,7 @@ use crate::models::{Goal, Task};
 pub struct Output {
     term: Term,
     json: bool,
+    concise: bool,
 }
 
 impl Output {
@@ -16,6 +17,15 @@ impl Output {
         Self {
             term: Term::stdout(),
             json,
+            concise: false,
+        }
+    }
+
+    pub fn with_concise(json: bool, concise: bool) -> Self {
+        Self {
+            term: Term::stdout(),
+            json,
+            concise,
         }
     }
 
@@ -206,6 +216,25 @@ impl Output {
         Ok(())
     }
 
+    pub fn task_commented(&self, task: &Task) -> Result<()> {
+        if self.json {
+            return self.print_json(task);
+        }
+
+        self.term.write_line(&format!(
+            "{} {}",
+            style("Added comment to task:").green(),
+            style(&task.id).cyan().bold()
+        ))?;
+        if let Some(comment) = task.comments.last() {
+            self.term
+                .write_line(&format!("  Comment: {}", comment.text))?;
+        }
+        self.term
+            .write_line(&format!("  Total comments: {}", task.comments.len()))?;
+        Ok(())
+    }
+
     pub fn status(&self, result: &StatusResult) -> Result<()> {
         match result {
             StatusResult::Task(task) => self.status_task(task),
@@ -275,6 +304,20 @@ impl Output {
             .write_line(&format!("  Elapsed: {}ms", task.metrics.elapsed_ms))?;
         self.term
             .write_line(&format!("  Retries: {}", task.metrics.retry_count))?;
+
+        if !self.concise && !task.comments.is_empty() {
+            self.term.write_line("")?;
+            self.term
+                .write_line(&style("Comments:").bold().to_string())?;
+            for comment in &task.comments {
+                self.term.write_line(&format!(
+                    "  [{}] {}",
+                    style(&comment.created_at).dim(),
+                    comment.text
+                ))?;
+            }
+        }
+
         Ok(())
     }
 
