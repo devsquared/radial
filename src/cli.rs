@@ -53,6 +53,9 @@ pub enum Commands {
         #[arg(long)]
         json: bool,
     },
+
+    /// Output a preparation guide for LLM agents
+    Prep,
 }
 
 #[derive(Subcommand)]
@@ -114,6 +117,10 @@ pub enum TaskCommands {
         /// Output as JSON
         #[arg(long)]
         json: bool,
+
+        /// Show comments on tasks
+        #[arg(short, long)]
+        verbose: bool,
     },
 
     /// Mark a task as started

@@ -10,6 +10,7 @@ pub struct Output {
     term: Term,
     json: bool,
     concise: bool,
+    verbose: bool,
 }
 
 impl Output {
@@ -18,6 +19,7 @@ impl Output {
             term: Term::stdout(),
             json,
             concise: false,
+            verbose: false,
         }
     }
 
@@ -26,6 +28,16 @@ impl Output {
             term: Term::stdout(),
             json,
             concise,
+            verbose: false,
+        }
+    }
+
+    pub fn with_verbose(json: bool, verbose: bool) -> Self {
+        Self {
+            term: Term::stdout(),
+            json,
+            concise: false,
+            verbose,
         }
     }
 
@@ -116,6 +128,17 @@ impl Output {
 
         for task in tasks {
             self.print_task_summary(task)?;
+            if self.verbose && !task.comments.is_empty() {
+                self.term
+                    .write_line(&format!("  Comments: ({})", task.comments.len()))?;
+                for comment in &task.comments {
+                    self.term.write_line(&format!(
+                        "    [{}] {}",
+                        style(&comment.created_at).dim(),
+                        comment.text
+                    ))?;
+                }
+            }
             self.term.write_line("")?;
         }
         Ok(())
@@ -445,6 +468,11 @@ impl Output {
             }
             self.term.write_line("")?;
         }
+        Ok(())
+    }
+
+    pub fn prep(&self, text: &str) -> Result<()> {
+        self.term.write_line(text)?;
         Ok(())
     }
 }
