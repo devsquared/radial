@@ -25,6 +25,16 @@ pub enum Commands {
     #[command(subcommand)]
     Task(TaskCommands),
 
+    /// Show full details of a goal or task
+    Show {
+        /// The goal or task ID to show
+        id: String,
+
+        /// Output as JSON
+        #[arg(long)]
+        json: bool,
+    },
+
     /// Show status of goals and tasks
     Status {
         /// Show status of a specific goal
@@ -38,10 +48,6 @@ pub enum Commands {
         /// Output as JSON
         #[arg(long)]
         json: bool,
-
-        /// Hide comments in output
-        #[arg(long)]
-        concise: bool,
     },
 
     /// Show tasks ready to be worked on

@@ -120,7 +120,7 @@ fn test_create_and_list_goals() {
     let output = env.run(&["goal", "list"]).expect("List failed");
     assert!(output.contains(goal_id));
     assert!(output.contains("Test goal description"));
-    assert!(output.contains("[pending]"));
+    assert!(output.contains("pending"));
 }
 
 #[test]
@@ -169,14 +169,22 @@ fn test_create_task_and_workflow() {
         .expect("List tasks failed");
     assert!(output.contains(task_id));
     assert!(output.contains("Test task"));
-    assert!(output.contains("[pending]"));
-    assert!(output.contains("Receives: Nothing"));
-    assert!(output.contains("Produces: Something"));
-    assert!(output.contains("Verify: It exists"));
+    assert!(output.contains("pending"));
+
+    // Full detail via show
+    let output = env
+        .run(&["show", task_id])
+        .expect("Show task failed");
+    assert!(output.contains("Receives"));
+    assert!(output.contains("Nothing"));
+    assert!(output.contains("Produces"));
+    assert!(output.contains("Something"));
+    assert!(output.contains("Verify"));
+    assert!(output.contains("It exists"));
 
     // Goal should now be in_progress
     let output = env.run(&["goal", "list"]).expect("List goals failed");
-    assert!(output.contains("[pending]") || output.contains("[in_progress]"));
+    assert!(output.contains("pending") || output.contains("in_progress"));
 }
 
 #[test]
@@ -218,7 +226,7 @@ fn test_task_state_transitions() {
     let output = env
         .run(&["status", "--task", task_id])
         .expect("Status failed");
-    assert!(output.contains("[pending]"));
+    assert!(output.contains("pending"));
 
     // Start the task
     env.run(&["task", "start", task_id])
@@ -226,7 +234,7 @@ fn test_task_state_transitions() {
     let output = env
         .run(&["status", "--task", task_id])
         .expect("Status failed");
-    assert!(output.contains("[in_progress]"));
+    assert!(output.contains("in_progress"));
 
     // Complete the task
     env.run(&[
@@ -241,7 +249,12 @@ fn test_task_state_transitions() {
     let output = env
         .run(&["status", "--task", task_id])
         .expect("Status failed");
-    assert!(output.contains("[completed]"));
+    assert!(output.contains("completed"));
+
+    // Full detail via show
+    let output = env
+        .run(&["show", task_id])
+        .expect("Show task failed");
     assert!(output.contains("Task completed successfully"));
 }
 
@@ -292,8 +305,8 @@ fn test_task_with_artifacts() {
     .expect("Complete failed");
 
     let output = env
-        .run(&["status", "--task", task_id])
-        .expect("Status failed");
+        .run(&["show", task_id])
+        .expect("Show task failed");
     assert!(output.contains("file1.txt"));
     assert!(output.contains("file2.txt"));
     assert!(output.contains("src/main.rs"));
@@ -361,7 +374,12 @@ fn test_blocked_tasks() {
     let output = env
         .run(&["status", "--task", task_id_2])
         .expect("Status failed");
-    assert!(output.contains("[blocked]"));
+    assert!(output.contains("blocked"));
+
+    // Full detail shows blocker
+    let output = env
+        .run(&["show", task_id_2])
+        .expect("Show task failed");
     assert!(output.contains(task_id_1));
 }
 
@@ -408,8 +426,13 @@ fn test_goal_completion() {
     let output = env
         .run(&["status", "--goal", goal_id])
         .expect("Status failed");
-    assert!(output.contains("[completed]"));
-    assert!(output.contains("Tasks: 1 total, 1 completed, 0 failed"));
+    assert!(output.contains("completed"));
+
+    // Full detail via show
+    let output = env
+        .run(&["show", goal_id])
+        .expect("Show goal failed");
+    assert!(output.contains("1 total, 1 completed, 0 failed"));
 }
 
 #[test]
@@ -429,7 +452,7 @@ fn test_status_commands() {
 
     // Status with no filter shows all goals
     let output = env.run(&["status"]).expect("Status failed");
-    assert!(output.contains("All Goals:"));
+    assert!(output.contains("ID"));
     assert!(output.contains(goal_id));
 
     // Status with goal filter
@@ -840,23 +863,23 @@ fn test_task_comments() {
         .expect("Add second comment failed");
     assert!(output.contains("Added comment to task"));
 
-    // Check that status shows comments
+    // Check that show displays comments
     let output = env
-        .run(&["status", "--task", task_id])
-        .expect("Status failed");
-    assert!(output.contains("Comments:"));
+        .run(&["show", task_id])
+        .expect("Show failed");
+    assert!(output.contains("Comments"));
     assert!(output.contains("First comment on task"));
     assert!(output.contains("Second comment with more detail"));
 }
 
 #[test]
-fn test_task_comments_concise_flag() {
+fn test_status_compact_vs_show_detail() {
     let env = TestEnv::new();
     env.run(&["init"]).expect("Init failed");
 
     // Create goal and task
     let output = env
-        .run(&["goal", "create", "Concise test"])
+        .run(&["goal", "create", "Compact test"])
         .expect("Create goal failed");
     let goal_id = output
         .lines()
@@ -869,7 +892,7 @@ fn test_task_comments_concise_flag() {
             "task",
             "create",
             goal_id,
-            "Task for concise test",
+            "Task for compact test",
             "--receives",
             "Input",
             "--produces",
@@ -885,25 +908,28 @@ fn test_task_comments_concise_flag() {
         .unwrap();
 
     // Add a comment
-    env.run(&["task", "comment", task_id, "This comment should be hidden"])
+    env.run(&["task", "comment", task_id, "This comment should only appear in show"])
         .expect("Add comment failed");
 
-    // Without --concise, comments should appear
+    // Status should be compact — no comments, no contract detail
     let output = env
         .run(&["status", "--task", task_id])
         .expect("Status failed");
-    assert!(output.contains("Comments:"));
-    assert!(output.contains("This comment should be hidden"));
-
-    // With --concise, comments should NOT appear
-    let output = env
-        .run(&["status", "--task", task_id, "--concise"])
-        .expect("Status --concise failed");
-    assert!(!output.contains("Comments:"));
-    assert!(!output.contains("This comment should be hidden"));
-    // But the task info should still be there
     assert!(output.contains(task_id));
-    assert!(output.contains("Task for concise test"));
+    assert!(output.contains("Task for compact test"));
+    assert!(!output.contains("Comments"));
+    assert!(!output.contains("This comment should only appear in show"));
+
+    // Show should have full detail including comments
+    let output = env
+        .run(&["show", task_id])
+        .expect("Show failed");
+    assert!(output.contains(task_id));
+    assert!(output.contains("Task for compact test"));
+    assert!(output.contains("Comments"));
+    assert!(output.contains("This comment should only appear in show"));
+    assert!(output.contains("Receives"));
+    assert!(output.contains("Input"));
 }
 
 #[test]
@@ -969,11 +995,11 @@ fn test_task_comments_json_output() {
     assert!(comments[0]["id"].is_string());
     assert!(comments[0]["created_at"].is_string());
 
-    // JSON output should include comments even with --concise
+    // Show --json should also include comments
     let output = env
-        .run(&["status", "--task", task_id, "--json", "--concise"])
-        .expect("Status --json --concise failed");
+        .run(&["show", task_id, "--json"])
+        .expect("Show --json failed");
     let parsed: Value = serde_json::from_str(&output).expect("Should be valid JSON");
     let comments = parsed["comments"].as_array().unwrap();
-    assert_eq!(comments.len(), 2, "JSON should always include comments");
+    assert_eq!(comments.len(), 2, "Show JSON should include comments");
 }

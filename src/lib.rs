@@ -161,11 +161,15 @@ pub fn run(cli: Cli) -> Result<()> {
             goal,
             task,
             json,
-            concise,
         } => {
             let db = ensure_initialized()?;
             let result = commands::status::run(goal, task, &db)?;
-            output::status(&result, json, concise)
+            output::status(&result, json)
+        }
+        Commands::Show { id, json } => {
+            let db = ensure_initialized()?;
+            let result = commands::show::run(&id, &db)?;
+            output::show(&result, json)
         }
         Commands::Ready { goal_id, json } => {
             let db = ensure_initialized()?;

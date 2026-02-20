@@ -9,7 +9,7 @@ use strum::{AsRefStr, EnumString};
 
 use super::{Comment, Contract, Outcome};
 use crate::db::atomic_write;
-use crate::output::{Render, write_field};
+use crate::output::Render;
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, AsRefStr, EnumString)]
 #[serde(rename_all = "lowercase")]
@@ -225,14 +225,14 @@ impl Render for Task {
             style(&self.id).cyan().bold(),
             style(self.state.as_ref()).yellow()
         )?;
-        write_field(w, "  ", "Description", &self.description)?;
+        writeln!(w, "  {}", &self.description)?;
 
         match self.contract {
             Some(ref contract) => {
                 writeln!(w, "  Contract:")?;
-                write_field(w, "    ", "Receives", contract.receives())?;
-                write_field(w, "    ", "Produces", contract.produces())?;
-                write_field(w, "    ", "Verify", contract.verify())?;
+                writeln!(w, "    Receives: {}", contract.receives())?;
+                writeln!(w, "    Produces: {}", contract.produces())?;
+                writeln!(w, "    Verify:   {}", contract.verify())?;
             }
             None => {
                 writeln!(w, "  Contract: {}", style("(not set)").dim())?;
@@ -244,7 +244,7 @@ impl Render for Task {
         }
 
         if let Some(result) = &self.result {
-            write_field(w, "  ", "Result", result.summary())?;
+            writeln!(w, "  Result: {}", result.summary())?;
             if !result.artifacts().is_empty() {
                 writeln!(w, "  Artifacts: {}", result.artifacts().join(", "))?;
             }

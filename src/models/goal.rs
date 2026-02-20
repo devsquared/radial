@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 use strum::{AsRefStr, EnumString};
 
 use crate::db::atomic_write;
-use crate::output::{Render, write_field};
+use crate::output::Render;
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, AsRefStr, EnumString)]
 #[serde(rename_all = "lowercase")]
@@ -204,7 +204,7 @@ impl Render for Goal {
             style(&self.id).cyan().bold(),
             style(self.state.as_ref()).yellow()
         )?;
-        write_field(w, "  ", "Description", &self.description)?;
+        writeln!(w, "  {}", &self.description)?;
         Ok(())
     }
 }

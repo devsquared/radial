@@ -4,5 +4,6 @@ pub mod goal;
 pub mod init;
 pub mod prep;
 pub mod ready;
+pub mod show;
 pub mod status;
 pub mod task;

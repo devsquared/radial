@@ -60,16 +60,10 @@ rd task comment <task_id> "Started investigating the auth flow"
 rd task comment <task_id> "Found the issue - missing token validation"
 ```
 
-Comments are shown when viewing task status:
+Comments are shown when viewing full task details:
 
 ```bash
-rd status --task <task_id>
-```
-
-Use the `--concise` flag to hide comments in status output:
-
-```bash
-rd status --task <task_id> --concise
+rd show <task_id>
 ```
 
 Use the `--verbose` flag to show comments when listing tasks:
@@ -81,9 +75,10 @@ rd task list <goal_id> --verbose
 ### Status & Ready
 
 ```bash
-rd status                    # Show all goals/tasks
-rd status --goal <goal_id>   # Status of specific goal
-rd status --task <task_id>   # Status of specific task
+rd status                    # Compact overview of all goals
+rd status --goal <goal_id>   # Compact status of a goal and its tasks
+rd status --task <task_id>   # Compact status of a task
+rd show <id>                 # Full details of a goal or task (auto-detects)
 rd ready <goal_id>           # Show tasks ready to work on (unblocked)
 ```
 
