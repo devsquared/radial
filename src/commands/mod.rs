@@ -3,6 +3,7 @@
 pub mod clean;
 pub mod goal;
 pub mod init;
+pub mod list;
 pub mod prep;
 pub mod ready;
 pub mod show;

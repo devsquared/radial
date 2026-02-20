@@ -153,6 +153,11 @@ pub fn run(cli: Cli) -> Result<()> {
             let mut db = ensure_initialized()?;
             run_goal(goal_cmd, &mut db)
         }
+        Commands::List { json } => {
+            let db = ensure_initialized()?;
+            let results = commands::list::run(&db)?;
+            output::list(&results, json)
+        }
         Commands::Task(task_cmd) => {
             let mut db = ensure_initialized()?;
             run_task(task_cmd, &mut db)

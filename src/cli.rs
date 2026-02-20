@@ -21,6 +21,14 @@ pub enum Commands {
     #[command(subcommand)]
     Goal(GoalCommands),
 
+    /// List all goals and their tasks in dependency order
+    #[command(alias = "ls")]
+    List {
+        /// Output as JSON
+        #[arg(long)]
+        json: bool,
+    },
+
     /// Manage tasks
     #[command(subcommand)]
     Task(TaskCommands),

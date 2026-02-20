@@ -4,6 +4,7 @@ use anyhow::Result;
 use console::style;
 use serde::Serialize;
 
+use crate::commands::list::GoalWithTasks;
 use crate::commands::show::ShowResult;
 use crate::commands::status::{GoalSummary, StatusResult};
 use crate::commands::task::CompleteResult;
@@ -514,6 +515,65 @@ pub fn ready_tasks(tasks: &[Task], goal: &Goal, json: bool) -> Result<()> {
                 style(task.id()).cyan(),
                 truncate(task.description(), 80),
             )?;
+        }
+        Ok(())
+    })
+}
+
+// -- List --
+
+pub fn list(results: &[GoalWithTasks], json: bool) -> Result<()> {
+    // For JSON, serialize as an array of goals with nested tasks
+    #[derive(Serialize)]
+    struct GoalEntry<'a> {
+        #[serde(flatten)]
+        goal: &'a Goal,
+        tasks: &'a [Task],
+        metrics: &'a crate::models::Metrics,
+    }
+
+    let entries: Vec<GoalEntry> = results
+        .iter()
+        .map(|r| GoalEntry {
+            goal: &r.goal,
+            tasks: &r.tasks,
+            metrics: &r.metrics,
+        })
+        .collect();
+
+    json_or(&entries, json, |w| {
+        if results.is_empty() {
+            writeln!(w, "No goals found.")?;
+            return Ok(());
+        }
+
+        for r in results {
+            let goal = &r.goal;
+            let metrics = &r.metrics;
+
+            writeln!(
+                w,
+                "{}  {}  ({}/{})",
+                style(goal.id()).cyan().bold(),
+                state_styled(goal.state().as_ref()),
+                metrics.tasks_completed(),
+                metrics.task_count(),
+            )?;
+            writeln!(w, "  {}", truncate(goal.description(), 80))?;
+
+            if !r.tasks.is_empty() {
+                writeln!(w)?;
+                for task in &r.tasks {
+                    writeln!(
+                        w,
+                        "  {:<10} {:<13} {}",
+                        style(task.id()).cyan(),
+                        state_styled(task.state().as_ref()),
+                        truncate(task.description(), 60),
+                    )?;
+                }
+            }
+            writeln!(w)?;
         }
         Ok(())
     })
