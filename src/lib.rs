@@ -13,7 +13,7 @@ pub mod output;
 use anyhow::{Context, Result, anyhow};
 use std::path::PathBuf;
 
-use cli::{Cli, Commands, GoalCommands, TaskCommands};
+use cli::{Cli, Commands, EditCommands, GoalCommands, TaskCommands};
 use db::Database;
 
 pub const RADIAL_DIR: &str = ".radial";
@@ -161,6 +161,37 @@ pub fn run(cli: Cli) -> Result<()> {
         Commands::Task(task_cmd) => {
             let mut db = ensure_initialized()?;
             run_task(task_cmd, &mut db)
+        }
+        Commands::Edit(edit_cmd) => {
+            let mut db = ensure_initialized()?;
+            match edit_cmd {
+                EditCommands::Goal {
+                    goal_id,
+                    description,
+                } => {
+                    let goal = commands::edit::goal(&goal_id, description, &mut db)?;
+                    output::goal_edited(&goal)
+                }
+                EditCommands::Task {
+                    task_id,
+                    description,
+                    receives,
+                    produces,
+                    verify,
+                    blocked_by,
+                } => {
+                    let task = commands::edit::task(
+                        &task_id,
+                        description,
+                        receives,
+                        produces,
+                        verify,
+                        blocked_by,
+                        &mut db,
+                    )?;
+                    output::task_edited(&task)
+                }
+            }
         }
         Commands::Status {
             goal,

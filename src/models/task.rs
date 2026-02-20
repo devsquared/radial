@@ -155,6 +155,21 @@ impl Task {
         &self.comments
     }
 
+    pub fn set_description(&mut self, description: String) {
+        self.description = description;
+        self.updated_at = Timestamp::now();
+    }
+
+    pub fn set_contract(&mut self, contract: Contract) {
+        self.contract = Some(contract);
+        self.updated_at = Timestamp::now();
+    }
+
+    pub fn set_blocked_by(&mut self, blocked_by: Vec<String>) {
+        self.blocked_by = blocked_by;
+        self.updated_at = Timestamp::now();
+    }
+
     pub fn file_path(&self, base: &Path) -> PathBuf {
         base.join(&self.goal_id).join(format!("{}.toml", self.id))
     }

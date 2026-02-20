@@ -84,6 +84,32 @@ pub fn goal_list(goals: &[Goal], json: bool) -> Result<()> {
     })
 }
 
+// -- Edit outputs --
+
+pub fn goal_edited(goal: &Goal) -> Result<()> {
+    let mut w = io::stdout().lock();
+    writeln!(
+        w,
+        "{} {}",
+        style("Updated goal:").green(),
+        style(goal.id()).cyan().bold()
+    )?;
+    writeln!(w, "  {}", truncate(goal.description(), 80))?;
+    Ok(())
+}
+
+pub fn task_edited(task: &Task) -> Result<()> {
+    let mut w = io::stdout().lock();
+    writeln!(
+        w,
+        "{} {}",
+        style("Updated task:").green(),
+        style(task.id()).cyan().bold()
+    )?;
+    writeln!(w, "  {}", truncate(task.description(), 80))?;
+    Ok(())
+}
+
 // -- Task outputs --
 
 pub fn task_created(task: &Task, json: bool) -> Result<()> {

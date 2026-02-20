@@ -164,6 +164,11 @@ impl Goal {
         &self.metrics
     }
 
+    pub fn set_description(&mut self, description: String) {
+        self.description = description;
+        self.updated_at = Timestamp::now();
+    }
+
     pub fn touch(&mut self) {
         self.updated_at = Timestamp::now();
     }

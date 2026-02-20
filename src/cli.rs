@@ -33,6 +33,10 @@ pub enum Commands {
     #[command(subcommand)]
     Task(TaskCommands),
 
+    /// Edit a goal or task
+    #[command(subcommand)]
+    Edit(EditCommands),
+
     /// Show full details of a goal or task
     Show {
         /// The goal or task ID to show
@@ -195,5 +199,44 @@ pub enum TaskCommands {
 
         /// The comment text
         text: String,
+    },
+}
+
+#[derive(Subcommand)]
+pub enum EditCommands {
+    /// Edit a goal's description
+    Goal {
+        /// The goal ID to edit
+        goal_id: String,
+
+        /// New description
+        #[arg(long)]
+        description: String,
+    },
+
+    /// Edit a task's description or contract
+    Task {
+        /// The task ID to edit
+        task_id: String,
+
+        /// New description
+        #[arg(long)]
+        description: Option<String>,
+
+        /// New receives (contract)
+        #[arg(long)]
+        receives: Option<String>,
+
+        /// New produces (contract)
+        #[arg(long)]
+        produces: Option<String>,
+
+        /// New verify (contract)
+        #[arg(long)]
+        verify: Option<String>,
+
+        /// Add a blocked-by dependency
+        #[arg(long, value_delimiter = ',')]
+        blocked_by: Option<Vec<String>>,
     },
 }
