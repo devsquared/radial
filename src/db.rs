@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 use std::fs::{self, File};
-use std::io::{BufRead, BufReader, Write};
+use std::io::Write;
 use std::path::{Path, PathBuf};
 
 use anyhow::{bail, Context, Result};
@@ -8,9 +8,6 @@ use fs2::FileExt;
 use jiff::Timestamp;
 
 use crate::models::{Goal, Metrics, Outcome, Task, TaskState};
-
-const GOALS_FILE: &str = "goals.jsonl";
-const TASKS_FILE: &str = "tasks.jsonl";
 
 pub struct Database {
     path: PathBuf,
@@ -20,7 +17,7 @@ pub struct Database {
 }
 
 impl Database {
-    /// Open an existing database from the given directory
+    /// Open an existing database from the given directory.
     pub fn open<P: AsRef<Path>>(path: P) -> Result<Self> {
         let path = path.as_ref().to_path_buf();
 
@@ -39,144 +36,134 @@ impl Database {
         Ok(db)
     }
 
-    /// Initialize a new database (creates empty files)
+    /// Initialize a new database. The `.radial/` directory must already exist.
     pub fn init_schema(&self) -> Result<()> {
-        let goals_path = self.path.join(GOALS_FILE);
-        let tasks_path = self.path.join(TASKS_FILE);
-
-        if !goals_path.exists() {
-            File::create(&goals_path).context("Failed to create goals.jsonl")?;
-        }
-
-        if !tasks_path.exists() {
-            File::create(&tasks_path).context("Failed to create tasks.jsonl")?;
-        }
-
+        // No files to pre-create; the directory is sufficient.
         Ok(())
     }
 
-    /// Load all data from JSONL files into memory
+    /// Load all data from the per-entity TOML files into memory.
+    ///
+    /// Directory layout:
+    /// ```text
+    /// .radial/
+    /// ├── {goal_id}/
+    /// │   ├── goal.toml
+    /// │   └── {task_id}.toml
+    /// ```
     fn load(&mut self) -> Result<()> {
-        self.load_goals()?;
-        self.load_tasks()?;
-        self.rebuild_indexes();
-        Ok(())
-    }
+        let dir = fs::read_dir(&self.path).context("Failed to read .radial directory")?;
 
-    fn load_goals(&mut self) -> Result<()> {
-        let goals_path = self.path.join(GOALS_FILE);
-        if !goals_path.exists() {
-            return Ok(());
-        }
+        for entry in dir {
+            let entry = entry.context("Failed to read directory entry")?;
+            let path = entry.path();
 
-        let file = File::open(&goals_path).context("Failed to open goals.jsonl")?;
-        let reader = BufReader::new(file);
-
-        for (line_num, line) in reader.lines().enumerate() {
-            let line = line.context("Failed to read line from goals.jsonl")?;
-            if line.trim().is_empty() {
+            if !path.is_dir() {
                 continue;
             }
 
-            let goal: Goal = serde_json::from_str(&line)
-                .with_context(|| format!("Failed to parse goal at line {}", line_num + 1))?;
-
-            self.goals.insert(goal.id.clone(), goal);
-        }
-
-        Ok(())
-    }
-
-    fn load_tasks(&mut self) -> Result<()> {
-        let tasks_path = self.path.join(TASKS_FILE);
-        if !tasks_path.exists() {
-            return Ok(());
-        }
-
-        let file = File::open(&tasks_path).context("Failed to open tasks.jsonl")?;
-        let reader = BufReader::new(file);
-
-        for (line_num, line) in reader.lines().enumerate() {
-            let line = line.context("Failed to read line from tasks.jsonl")?;
-            if line.trim().is_empty() {
+            let goal_toml_path = path.join("goal.toml");
+            if !goal_toml_path.exists() {
                 continue;
             }
 
-            let task: Task = serde_json::from_str(&line)
-                .with_context(|| format!("Failed to parse task at line {}", line_num + 1))?;
+            let goal_content = fs::read_to_string(&goal_toml_path)
+                .with_context(|| format!("Failed to read {}", goal_toml_path.display()))?;
+            let goal: Goal = toml::from_str(&goal_content)
+                .with_context(|| format!("Failed to parse {}", goal_toml_path.display()))?;
 
-            self.tasks.insert(task.id.clone(), task);
+            let goal_id = goal.id.clone();
+            self.goals.insert(goal_id.clone(), goal);
+
+            let task_dir = fs::read_dir(&path)
+                .with_context(|| format!("Failed to read goal directory: {}", path.display()))?;
+
+            for task_entry in task_dir {
+                let task_entry = task_entry.context("Failed to read task entry")?;
+                let task_path = task_entry.path();
+
+                if task_path.file_name() == Some(std::ffi::OsStr::new("goal.toml")) {
+                    continue;
+                }
+
+                if task_path.extension() != Some(std::ffi::OsStr::new("toml")) {
+                    continue;
+                }
+
+                let task_content = fs::read_to_string(&task_path)
+                    .with_context(|| format!("Failed to read {}", task_path.display()))?;
+                let task: Task = toml::from_str(&task_content)
+                    .with_context(|| format!("Failed to parse {}", task_path.display()))?;
+
+                self.tasks_by_goal
+                    .entry(task.goal_id.clone())
+                    .or_default()
+                    .push(task.id.clone());
+
+                self.tasks.insert(task.id.clone(), task);
+            }
         }
 
         Ok(())
     }
 
-    fn rebuild_indexes(&mut self) {
-        self.tasks_by_goal.clear();
+    /// Write a single goal to `.radial/{goal_id}/goal.toml` atomically.
+    fn persist_goal(&self, goal: &Goal) -> Result<()> {
+        let goal_dir = self.path.join(&goal.id);
+        let final_path = goal_dir.join("goal.toml");
+        let temp_path = goal_dir.join("goal.toml.tmp");
 
-        for task in self.tasks.values() {
-            self.tasks_by_goal
-                .entry(task.goal_id.clone())
-                .or_default()
-                .push(task.id.clone());
-        }
-    }
+        let content = toml::to_string(goal).context("Failed to serialize goal")?;
 
-    /// Write all goals to disk atomically
-    fn persist_goals(&self) -> Result<()> {
-        let temp_path = self.path.join("goals.jsonl.tmp");
-        let final_path = self.path.join(GOALS_FILE);
-
-        let mut file = File::create(&temp_path).context("Failed to create temporary goals file")?;
+        let mut file = File::create(&temp_path).context("Failed to create temporary goal file")?;
 
         file.lock_exclusive()
-            .context("Failed to acquire lock on goals file")?;
+            .context("Failed to acquire lock on goal file")?;
 
-        for goal in self.goals.values() {
-            serde_json::to_writer(&mut file, goal)?;
-            writeln!(file)?;
-        }
+        file.write_all(content.as_bytes())
+            .context("Failed to write goal file")?;
+        file.sync_all().context("Failed to sync goal file")?;
+        file.unlock().context("Failed to unlock goal file")?;
 
-        file.sync_all().context("Failed to sync goals file")?;
-        file.unlock().context("Failed to unlock goals file")?;
-
-        fs::rename(&temp_path, &final_path).context("Failed to rename goals file")?;
+        fs::rename(&temp_path, &final_path).context("Failed to rename goal file")?;
 
         Ok(())
     }
 
-    /// Write all tasks to disk atomically
-    fn persist_tasks(&self) -> Result<()> {
-        let temp_path = self.path.join("tasks.jsonl.tmp");
-        let final_path = self.path.join(TASKS_FILE);
+    /// Write a single task to `.radial/{goal_id}/{task_id}.toml` atomically.
+    fn persist_task(&self, task: &Task) -> Result<()> {
+        let goal_dir = self.path.join(&task.goal_id);
+        let final_path = goal_dir.join(format!("{}.toml", task.id));
+        let temp_path = goal_dir.join(format!("{}.toml.tmp", task.id));
 
-        let mut file = File::create(&temp_path).context("Failed to create temporary tasks file")?;
+        let content = toml::to_string(task).context("Failed to serialize task")?;
+
+        let mut file = File::create(&temp_path).context("Failed to create temporary task file")?;
 
         file.lock_exclusive()
-            .context("Failed to acquire lock on tasks file")?;
+            .context("Failed to acquire lock on task file")?;
 
-        for task in self.tasks.values() {
-            serde_json::to_writer(&mut file, task)?;
-            writeln!(file)?;
-        }
+        file.write_all(content.as_bytes())
+            .context("Failed to write task file")?;
+        file.sync_all().context("Failed to sync task file")?;
+        file.unlock().context("Failed to unlock task file")?;
 
-        file.sync_all().context("Failed to sync tasks file")?;
-        file.unlock().context("Failed to unlock tasks file")?;
-
-        fs::rename(&temp_path, &final_path).context("Failed to rename tasks file")?;
+        fs::rename(&temp_path, &final_path).context("Failed to rename task file")?;
 
         Ok(())
     }
 
     // Goal operations
-
     pub fn create_goal(&mut self, goal: &Goal) -> Result<()> {
         if self.goals.contains_key(&goal.id) {
             bail!("Goal already exists: {}", goal.id);
         }
 
+        let goal_dir = self.path.join(&goal.id);
+        fs::create_dir_all(&goal_dir).context("Failed to create goal directory")?;
+
         self.goals.insert(goal.id.clone(), goal.clone());
-        self.persist_goals()?;
+        self.persist_goal(goal)?;
 
         Ok(())
     }
@@ -197,7 +184,7 @@ impl Database {
         }
 
         self.goals.insert(goal.id.clone(), goal.clone());
-        self.persist_goals()?;
+        self.persist_goal(goal)?;
 
         Ok(())
     }
@@ -215,7 +202,7 @@ impl Database {
             .push(task.id.clone());
 
         self.tasks.insert(task.id.clone(), task.clone());
-        self.persist_tasks()?;
+        self.persist_task(task)?;
 
         Ok(())
     }
@@ -246,13 +233,13 @@ impl Database {
         }
 
         self.tasks.insert(task.id.clone(), task.clone());
-        self.persist_tasks()?;
+        self.persist_task(task)?;
 
         Ok(())
     }
 
     /// Atomically transition a task from one state to another.
-    /// Returns Ok(true) if the transition succeeded, Ok(false) if the task was not in the expected state.
+    /// Returns `Ok(true)` if the transition succeeded, `Ok(false)` if the task was not in the expected state.
     pub fn transition_task_state(
         &mut self,
         task_id: &str,
@@ -271,13 +258,14 @@ impl Database {
         task.state = to_state.clone();
         task.updated_at = updated_at.parse().unwrap_or_else(|_| Timestamp::now());
 
-        self.persist_tasks()?;
+        let task = task.clone();
+        self.persist_task(&task)?;
 
         Ok(true)
     }
 
     /// Atomically transition a task from one of several states to a new state.
-    /// Returns Ok(true) if the transition succeeded, Ok(false) if the task was not in any of the expected states.
+    /// Returns `Ok(true)` if the transition succeeded, `Ok(false)` if the task was not in any of the expected states.
     pub fn transition_task_state_from_any(
         &mut self,
         task_id: &str,
@@ -296,7 +284,9 @@ impl Database {
         task.state = to_state.clone();
         task.updated_at = updated_at.parse().unwrap_or_else(|_| Timestamp::now());
 
-        self.persist_tasks()?;
+        let task = task.clone();
+        self.persist_task(&task)?;
+
         Ok(true)
     }
 
@@ -307,7 +297,7 @@ impl Database {
         &mut self,
         task_id: &str,
         result_summary: &str,
-        result_artifacts: Option<&str>,
+        result_artifacts: Vec<String>,
         tokens: i64,
         elapsed_ms: i64,
         updated_at: &str,
@@ -324,16 +314,15 @@ impl Database {
         task.state = TaskState::Completed;
         task.result = Some(Outcome {
             summary: result_summary.to_string(),
-            artifacts: result_artifacts
-                .map(|a| serde_json::from_str(a).unwrap_or_default())
-                .unwrap_or_default(),
+            artifacts: result_artifacts,
         });
         task.metrics.tokens = tokens;
         task.metrics.elapsed_ms = elapsed_ms;
         task.updated_at = updated_at.parse().unwrap_or_else(|_| Timestamp::now());
         task.completed_at = Some(completed_at.parse().unwrap_or_else(|_| Timestamp::now()));
 
-        self.persist_tasks()?;
+        let task = task.clone();
+        self.persist_task(&task)?;
 
         Ok(true)
     }
@@ -353,7 +342,8 @@ impl Database {
         task.metrics.retry_count += 1;
         task.updated_at = updated_at.parse().unwrap_or_else(|_| Timestamp::now());
 
-        self.persist_tasks()?;
+        let task = task.clone();
+        self.persist_task(&task)?;
 
         Ok(true)
     }

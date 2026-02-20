@@ -71,18 +71,19 @@ pub fn create(
         None
     };
 
+    let blocked_by_ids = blocked_by.unwrap_or_default();
     let now = Timestamp::now();
     let task = Task {
         id: generate_id(),
         goal_id: goal.id.clone(),
         description,
         contract,
-        state: if blocked_by.is_some() {
-            TaskState::Blocked
-        } else {
+        state: if blocked_by_ids.is_empty() {
             TaskState::Pending
+        } else {
+            TaskState::Blocked
         },
-        blocked_by,
+        blocked_by: blocked_by_ids,
         result: None,
         created_at: now,
         updated_at: now,
@@ -145,13 +146,11 @@ pub fn start(task_id: String, db: &mut Database) -> Result<Task> {
         ));
     }
 
-    if task.state == TaskState::Blocked {
-        if let Some(ref blocked_by) = task.blocked_by {
-            return Err(anyhow!(
-                "Task is blocked by: {}\nComplete those tasks first, or use --force to override.",
-                blocked_by.join(", ")
-            ));
-        }
+    if task.state == TaskState::Blocked && !task.blocked_by.is_empty() {
+        return Err(anyhow!(
+            "Task is blocked by: {}\nComplete those tasks first, or use --force to override.",
+            task.blocked_by.join(", ")
+        ));
     }
 
     if task.state != TaskState::Pending {
@@ -225,12 +224,11 @@ pub fn complete(
     let updated_at = now.to_string();
     let completed_at = now.to_string();
     let artifacts_list = artifacts.unwrap_or_default();
-    let artifacts_json = serde_json::to_string(&artifacts_list)?;
 
     let transitioned = db.complete_task(
         &task.id,
         &result_summary,
-        Some(&artifacts_json),
+        artifacts_list,
         tokens.unwrap_or(0),
         elapsed.unwrap_or(0),
         &updated_at,
@@ -259,23 +257,21 @@ pub fn complete(
     let mut unblocked_task_ids = Vec::new();
 
     for mut dependent_task in all_tasks.iter().cloned() {
-        if dependent_task.state == TaskState::Blocked {
-            if let Some(ref blocked_by) = dependent_task.blocked_by {
-                if blocked_by.contains(&completed_task_id) {
-                    // Check if all blocking tasks are now completed
-                    let all_blockers_done = blocked_by.iter().all(|blocker_id| {
-                        all_tasks
-                            .iter()
-                            .any(|t| t.id == *blocker_id && t.state == TaskState::Completed)
-                    });
+        if dependent_task.state == TaskState::Blocked
+            && dependent_task.blocked_by.contains(&completed_task_id)
+        {
+            // Check if all blocking tasks are now completed
+            let all_blockers_done = dependent_task.blocked_by.iter().all(|blocker_id| {
+                all_tasks
+                    .iter()
+                    .any(|t| t.id == *blocker_id && t.state == TaskState::Completed)
+            });
 
-                    if all_blockers_done {
-                        dependent_task.state = TaskState::Pending;
-                        dependent_task.updated_at = Timestamp::now();
-                        db.update_task(&dependent_task)?;
-                        unblocked_task_ids.push(dependent_task.id.clone());
-                    }
-                }
+            if all_blockers_done {
+                dependent_task.state = TaskState::Pending;
+                dependent_task.updated_at = Timestamp::now();
+                db.update_task(&dependent_task)?;
+                unblocked_task_ids.push(dependent_task.id.clone());
             }
         }
     }

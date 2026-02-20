@@ -18,8 +18,6 @@ use db::Database;
 use output::Output;
 
 pub const RADIAL_DIR: &str = ".radial";
-pub const GOALS_FILE: &str = "goals.jsonl";
-pub const TASKS_FILE: &str = "tasks.jsonl";
 pub const REDIRECT_FILE: &str = "redirect";
 
 /// Finds the `.radial/` directory by walking up from the current directory.
@@ -69,15 +67,6 @@ fn get_radial_path() -> Option<PathBuf> {
 fn ensure_initialized() -> Result<Database> {
     let radial_dir = get_radial_path()
         .ok_or_else(|| anyhow!("Radial not initialized. Run 'radial init' first."))?;
-
-    let goals_file = radial_dir.join(GOALS_FILE);
-    let tasks_file = radial_dir.join(TASKS_FILE);
-
-    if !goals_file.exists() || !tasks_file.exists() {
-        return Err(anyhow!(
-            "Radial database is corrupted or incomplete. Both goals.jsonl and tasks.jsonl must exist.\nRun 'radial init' to reinitialize."
-        ));
-    }
 
     Database::open(&radial_dir).context("Failed to open database")
 }

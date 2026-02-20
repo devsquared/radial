@@ -28,12 +28,16 @@ pub struct Task {
     pub id: String,
     pub goal_id: String,
     pub description: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub contract: Option<Contract>,
     pub state: TaskState,
-    pub blocked_by: Option<Vec<String>>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub blocked_by: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub result: Option<Outcome>,
     pub created_at: Timestamp,
     pub updated_at: Timestamp,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub completed_at: Option<Timestamp>,
     pub metrics: TaskMetrics,
     #[serde(default)]

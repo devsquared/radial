@@ -48,9 +48,9 @@ impl TestEnv {
         self.work_dir.join(".radial").exists()
     }
 
-    /// Check if database files exist
+    /// Check if the database directory exists (sentinel for a valid initialized state)
     fn db_exists(&self) -> bool {
-        self.work_dir.join(".radial").join("goals.jsonl").exists()
+        self.work_dir.join(".radial").is_dir()
     }
 }
 
@@ -590,7 +590,7 @@ fn test_redirect_file() {
         let mut path = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
         path.push("target");
         path.push("debug");
-        path.push("radial");
+        path.push("rd");
         path
     };
 

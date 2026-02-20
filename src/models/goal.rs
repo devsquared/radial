@@ -26,11 +26,13 @@ pub struct Metrics {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Goal {
     pub id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub parent_id: Option<String>,
     pub description: String,
     pub state: GoalState,
     pub created_at: Timestamp,
     pub updated_at: Timestamp,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub completed_at: Option<Timestamp>,
     pub metrics: Metrics,
 }

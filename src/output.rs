@@ -166,9 +166,9 @@ impl Output {
                 .write_line(&format!("  Contract: {}", style("(not set)").dim()))?;
         }
 
-        if let Some(blocked_by) = &task.blocked_by {
+        if !task.blocked_by.is_empty() {
             self.term
-                .write_line(&format!("  Blocked by: {}", blocked_by.join(", ")))?;
+                .write_line(&format!("  Blocked by: {}", task.blocked_by.join(", ")))?;
         }
 
         if let Some(result) = &task.result {
@@ -299,10 +299,10 @@ impl Output {
                 .write_line(&format!("Contract: {}", style("(not set)").dim()))?;
         }
 
-        if let Some(blocked_by) = &task.blocked_by {
+        if !task.blocked_by.is_empty() {
             self.term.write_line("")?;
             self.term
-                .write_line(&format!("Blocked by: {}", blocked_by.join(", ")))?;
+                .write_line(&format!("Blocked by: {}", task.blocked_by.join(", ")))?;
         }
 
         if let Some(result) = &task.result {
