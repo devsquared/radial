@@ -7,7 +7,7 @@ use strum::{AsRefStr, EnumString};
 
 use crate::db::atomic_write;
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, AsRefStr, EnumString)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, AsRefStr, EnumString)]
 #[serde(rename_all = "lowercase")]
 #[strum(serialize_all = "snake_case")]
 pub enum GoalState {

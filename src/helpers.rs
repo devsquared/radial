@@ -1,10 +1,10 @@
 use strsim::levenshtein;
 
 /// Find the most similar ID from a list of candidates
-pub fn find_similar_id(target: &str, candidates: &[String]) -> Option<String> {
+pub fn find_similar_id<'a>(target: &str, candidates: &[&'a str]) -> Option<&'a str> {
     candidates
         .iter()
-        .map(|candidate| (candidate.clone(), levenshtein(target, candidate)))
+        .map(|&candidate| (candidate, levenshtein(target, candidate)))
         .filter(|(_, distance)| *distance <= 2)
         .min_by_key(|(_, distance)| *distance)
         .map(|(id, _)| id)
@@ -16,20 +16,16 @@ mod tests {
 
     #[test]
     fn test_find_similar_id() {
-        let candidates = vec![
-            "t8zwaROl".to_string(),
-            "xYz9Kp2m".to_string(),
-            "V1StGXR8".to_string(),
-        ];
+        let candidates = vec!["t8zwaROl", "xYz9Kp2m", "V1StGXR8"];
 
         assert_eq!(
             find_similar_id("t8zwaRO1", &candidates),
-            Some("t8zwaROl".to_string())
+            Some("t8zwaROl")
         );
 
         assert_eq!(
             find_similar_id("xYz9Kp2n", &candidates),
-            Some("xYz9Kp2m".to_string())
+            Some("xYz9Kp2m")
         );
 
         // Very different ID should return None
