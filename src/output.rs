@@ -45,7 +45,16 @@ fn terminal_width() -> usize {
 /// {prefix}  {wrapped line 2}
 /// ```
 pub fn write_field(w: &mut dyn Write, prefix: &str, label: &str, value: &str) -> Result<()> {
-    let width = terminal_width();
+    write_field_with_width(w, prefix, label, value, terminal_width())
+}
+
+pub fn write_field_with_width(
+    w: &mut dyn Write,
+    prefix: &str,
+    label: &str,
+    value: &str,
+    width: usize,
+) -> Result<()> {
     let inline_prefix = format!("{prefix}{label}: ");
     let inline_len = inline_prefix.len() + value.len();
 
@@ -405,4 +414,109 @@ pub fn prep(text: &str) -> Result<()> {
     let mut w = io::stdout().lock();
     writeln!(w, "{text}")?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use rstest::rstest;
+
+    fn field(prefix: &str, label: &str, value: &str, width: usize) -> String {
+        let mut buf = Vec::new();
+        write_field_with_width(&mut buf, prefix, label, value, width).unwrap();
+        String::from_utf8(buf).unwrap()
+    }
+
+    // -- inline cases --
+
+    // Short values that fit within the terminal width should render on
+    // a single line as "{prefix}{label}: {value}".
+    #[rstest]
+    #[case::fits_easily("  ", "Name", "hello", 80, "  Name: hello\n")]
+    #[case::exact_width("  ", "Name", "hi", 10, "  Name: hi\n")]
+    #[case::no_prefix("", "K", "v", 40, "K: v\n")]
+    fn write_field_inline(
+        #[case] prefix: &str,
+        #[case] label: &str,
+        #[case] value: &str,
+        #[case] width: usize,
+        #[case] expected: &str,
+    ) {
+        assert_eq!(field(prefix, label, value, width), expected);
+    }
+
+    // -- wrapping cases --
+
+    // When the inline form exceeds terminal width, the label goes on its
+    // own line and the value wraps onto indented continuation lines.
+    #[rstest]
+    fn write_field_exceeds_width_wraps() {
+        let out = field("  ", "Label", "this is a long value that wraps", 20);
+        assert!(out.starts_with("  Label:\n"));
+        for line in out.lines().skip(1) {
+            assert!(
+                line.starts_with("    "),
+                "line should be indented: {line:?}"
+            );
+        }
+    }
+
+    // Values containing newlines always use wrap mode, even if each
+    // individual line would fit inline.
+    #[rstest]
+    fn write_field_multiline_always_wraps() {
+        let out = field("  ", "Desc", "line one\nline two", 200);
+        assert!(out.starts_with("  Desc:\n"));
+        assert!(out.contains("line one"));
+        assert!(out.contains("line two"));
+    }
+
+    // Blank lines in the input (consecutive newlines) should be preserved
+    // as empty lines in the output.
+    #[rstest]
+    fn write_field_preserves_blank_lines() {
+        let out = field("", "X", "a\n\nb", 200);
+        let lines: Vec<&str> = out.lines().collect();
+        assert_eq!(lines[0], "X:");
+        assert!(lines[1].contains('a'));
+        assert_eq!(lines[2], "");
+        assert!(lines[3].contains('b'));
+    }
+
+    // textwrap should break at word boundaries, keeping each continuation
+    // line within the terminal width.
+    #[rstest]
+    fn write_field_wraps_at_word_boundaries() {
+        let out = field(
+            "  ",
+            "D",
+            "short words in a sentence that should wrap nicely",
+            30,
+        );
+        assert!(out.starts_with("  D:\n"));
+        for line in out.lines().skip(1) {
+            assert!(
+                line.len() <= 30,
+                "line too long ({} chars): {line:?}",
+                line.len()
+            );
+        }
+    }
+
+    // An empty label produces ": " as the separator; the value should
+    // still render correctly.
+    #[rstest]
+    fn write_field_empty_label() {
+        let out = field("  ", "", "some text", 80);
+        assert_eq!(out, "  : some text\n");
+    }
+
+    // Even with an absurdly small terminal width, wrap_width floors at 20
+    // to prevent degenerate wrapping. Should not panic.
+    #[rstest]
+    fn write_field_minimum_wrap_width() {
+        let out = field("", "X", "a very long string that needs wrapping", 5);
+        assert!(out.starts_with("X:\n"));
+        assert!(out.contains("a very long string"));
+    }
 }

@@ -149,3 +149,246 @@ impl Render for Task {
         Ok(())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::output::Render;
+    use rstest::{fixture, rstest};
+
+    #[fixture]
+    fn task() -> Task {
+        let now = Timestamp::now();
+        Task {
+            id: "t_abc123".to_string(),
+            goal_id: "g_xyz789".to_string(),
+            description: "test task".to_string(),
+            contract: None,
+            state: TaskState::Pending,
+            blocked_by: Vec::new(),
+            result: None,
+            created_at: now,
+            updated_at: now,
+            completed_at: None,
+            metrics: TaskMetrics::default(),
+            comments: Vec::new(),
+        }
+    }
+
+    fn render_to_string(task: &Task) -> String {
+        let mut buf = Vec::new();
+        task.render(&mut buf).unwrap();
+        String::from_utf8(buf).unwrap()
+    }
+
+    // -- transition --
+
+    // transition() only succeeds when the task's current state matches `from`.
+    // Cases where initial == from should succeed; mismatches should leave the
+    // task unchanged with its original updated_at timestamp.
+    #[rstest]
+    #[case::matching_pending(TaskState::Pending, TaskState::Pending, TaskState::InProgress, true)]
+    #[case::matching_in_progress(TaskState::InProgress, TaskState::InProgress, TaskState::Completed, true)]
+    #[case::mismatch_completed(TaskState::Completed, TaskState::Pending, TaskState::InProgress, false)]
+    #[case::mismatch_failed(TaskState::Failed, TaskState::Pending, TaskState::InProgress, false)]
+    fn transition_checks_current_state(
+        mut task: Task,
+        #[case] initial: TaskState,
+        #[case] from: TaskState,
+        #[case] to: TaskState,
+        #[case] expected: bool,
+    ) {
+        task.state = initial;
+        let before = task.updated_at;
+        let result = task.transition(from, to);
+        assert_eq!(result, expected);
+        if expected {
+            assert_eq!(task.state, to);
+            assert!(task.updated_at >= before);
+        } else {
+            assert_eq!(task.state, initial);
+            assert_eq!(task.updated_at, before);
+        }
+    }
+
+    // -- transition_from_any --
+
+    // transition_from_any() accepts a list of valid source states.
+    // Only states in the list should transition; others are rejected.
+    #[rstest]
+    #[case::in_progress_matches(TaskState::InProgress, true)]
+    #[case::verifying_matches(TaskState::Verifying, true)]
+    #[case::pending_rejected(TaskState::Pending, false)]
+    #[case::completed_rejected(TaskState::Completed, false)]
+    fn transition_from_any_matches_list(
+        mut task: Task,
+        #[case] current: TaskState,
+        #[case] expected: bool,
+    ) {
+        task.state = current;
+        let result = task.transition_from_any(
+            &[TaskState::InProgress, TaskState::Verifying],
+            TaskState::Failed,
+        );
+        assert_eq!(result, expected);
+        if expected {
+            assert_eq!(task.state, TaskState::Failed);
+        } else {
+            assert_eq!(task.state, current);
+        }
+    }
+
+    // -- complete --
+
+    // Completing an InProgress task should set state, result, metrics,
+    // completed_at, and updated_at all in one shot.
+    #[rstest]
+    fn complete_sets_all_fields(mut task: Task) {
+        task.state = TaskState::InProgress;
+        let outcome = Outcome {
+            summary: "done".to_string(),
+            artifacts: vec!["file.txt".to_string()],
+        };
+        let metrics = TaskMetrics {
+            tokens: 100,
+            elapsed_ms: 5000,
+            retry_count: 1,
+        };
+
+        assert!(task.complete(outcome, metrics));
+        assert_eq!(task.state, TaskState::Completed);
+        assert!(task.completed_at.is_some());
+        assert_eq!(task.result.as_ref().unwrap().summary, "done");
+        assert_eq!(task.metrics.tokens, 100);
+        assert_eq!(task.metrics.retry_count, 1);
+    }
+
+    // complete() is only valid from InProgress. Every other state should
+    // be rejected, leaving the task untouched.
+    #[rstest]
+    #[case::from_pending(TaskState::Pending)]
+    #[case::from_blocked(TaskState::Blocked)]
+    #[case::from_completed(TaskState::Completed)]
+    #[case::from_failed(TaskState::Failed)]
+    fn complete_rejects_non_in_progress(mut task: Task, #[case] state: TaskState) {
+        task.state = state;
+        let outcome = Outcome {
+            summary: "done".to_string(),
+            artifacts: Vec::new(),
+        };
+        assert!(!task.complete(outcome, TaskMetrics::default()));
+        assert_eq!(task.state, state);
+        assert!(task.completed_at.is_none());
+    }
+
+    // -- retry --
+
+    // Retrying a failed task should move it back to InProgress and
+    // bump the retry counter.
+    #[rstest]
+    fn retry_increments_and_transitions(mut task: Task) {
+        task.state = TaskState::Failed;
+        task.metrics.retry_count = 2;
+        assert!(task.retry());
+        assert_eq!(task.state, TaskState::InProgress);
+        assert_eq!(task.metrics.retry_count, 3);
+    }
+
+    // retry() is only valid from Failed. Every other state should be rejected.
+    #[rstest]
+    #[case::from_pending(TaskState::Pending)]
+    #[case::from_in_progress(TaskState::InProgress)]
+    #[case::from_completed(TaskState::Completed)]
+    #[case::from_blocked(TaskState::Blocked)]
+    fn retry_rejects_non_failed(mut task: Task, #[case] state: TaskState) {
+        task.state = state;
+        assert!(!task.retry());
+        assert_eq!(task.state, state);
+    }
+
+    // -- unblock --
+
+    // Unblocking sets the task to Pending unconditionally and bumps updated_at.
+    #[rstest]
+    fn unblock_sets_pending(mut task: Task) {
+        task.state = TaskState::Blocked;
+        let before = task.updated_at;
+        task.unblock();
+        assert_eq!(task.state, TaskState::Pending);
+        assert!(task.updated_at >= before);
+    }
+
+    // -- add_comment --
+
+    // Adding a comment should append to the list and bump updated_at.
+    #[rstest]
+    fn add_comment_appends_and_updates_timestamp(mut task: Task) {
+        let before = task.updated_at;
+        let comment = Comment {
+            id: "c_1".to_string(),
+            text: "hello".to_string(),
+            created_at: Timestamp::now(),
+        };
+        task.add_comment(comment);
+
+        assert_eq!(task.comments.len(), 1);
+        assert_eq!(task.comments[0].text, "hello");
+        assert!(task.updated_at >= before);
+    }
+
+    // -- file_path --
+
+    // Task files live at {base}/{goal_id}/{task_id}.toml.
+    #[rstest]
+    fn file_path_is_correct(task: Task) {
+        let path = task.file_path(Path::new("/tmp/.radial"));
+        assert_eq!(path, PathBuf::from("/tmp/.radial/g_xyz789/t_abc123.toml"));
+    }
+
+    // -- render --
+
+    // The summary render should show the description and indicate
+    // missing contract with "(not set)".
+    #[rstest]
+    fn render_includes_description(task: Task) {
+        let output = render_to_string(&task);
+        assert!(output.contains("test task"));
+        assert!(output.contains("(not set)"));
+    }
+
+    // When a contract is present, all three fields should appear.
+    #[rstest]
+    fn render_includes_contract_fields(mut task: Task) {
+        task.contract = Some(Contract {
+            receives: "input data".to_string(),
+            produces: "output data".to_string(),
+            verify: "check output".to_string(),
+        });
+        let output = render_to_string(&task);
+        assert!(output.contains("input data"));
+        assert!(output.contains("output data"));
+        assert!(output.contains("check output"));
+    }
+
+    // Blocked tasks should show which task IDs they're waiting on.
+    #[rstest]
+    fn render_includes_blocked_by(mut task: Task) {
+        task.state = TaskState::Blocked;
+        task.blocked_by = vec!["t_other".to_string()];
+        let output = render_to_string(&task);
+        assert!(output.contains("Blocked by: t_other"));
+    }
+
+    // Completed tasks should show the result summary and artifact list.
+    #[rstest]
+    fn render_includes_result(mut task: Task) {
+        task.state = TaskState::Completed;
+        task.result = Some(Outcome {
+            summary: "all good".to_string(),
+            artifacts: vec!["out.txt".to_string()],
+        });
+        let output = render_to_string(&task);
+        assert!(output.contains("all good"));
+        assert!(output.contains("out.txt"));
+    }
+}

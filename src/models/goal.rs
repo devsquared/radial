@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 use strum::{AsRefStr, EnumString};
 
 use crate::db::atomic_write;
-use crate::output::{write_field, Render};
+use crate::output::{Render, write_field};
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, AsRefStr, EnumString)]
 #[serde(rename_all = "lowercase")]
@@ -29,6 +29,19 @@ pub struct Metrics {
     pub task_count: i64,
     pub tasks_completed: i64,
     pub tasks_failed: i64,
+}
+
+impl Render for Metrics {
+    fn render(&self, w: &mut dyn Write) -> Result<()> {
+        writeln!(
+            w,
+            "  Tasks: {} total, {} completed, {} failed",
+            self.task_count, self.tasks_completed, self.tasks_failed
+        )?;
+        writeln!(w, "  Tokens: {}", self.total_tokens)?;
+        writeln!(w, "  Elapsed: {}ms", self.elapsed_ms)?;
+        Ok(())
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -66,19 +79,6 @@ impl Render for Goal {
             style(self.state.as_ref()).yellow()
         )?;
         write_field(w, "  ", "Description", &self.description)?;
-        Ok(())
-    }
-}
-
-impl Render for Metrics {
-    fn render(&self, w: &mut dyn Write) -> Result<()> {
-        writeln!(
-            w,
-            "  Tasks: {} total, {} completed, {} failed",
-            self.task_count, self.tasks_completed, self.tasks_failed
-        )?;
-        writeln!(w, "  Tokens: {}", self.total_tokens)?;
-        writeln!(w, "  Elapsed: {}ms", self.elapsed_ms)?;
         Ok(())
     }
 }
