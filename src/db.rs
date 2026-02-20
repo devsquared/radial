@@ -140,6 +140,24 @@ impl Database {
         goals
     }
 
+    /// Delete a goal and all its tasks from disk and memory.
+    pub fn delete_goal(&mut self, goal_id: &str) -> Result<()> {
+        // Remove tasks from memory
+        self.tasks.retain(|_, t| t.goal_id() != goal_id);
+
+        // Remove goal from memory
+        self.goals.remove(goal_id);
+
+        // Remove the goal directory from disk
+        let goal_dir = self.path.join(goal_id);
+        if goal_dir.exists() {
+            fs::remove_dir_all(&goal_dir)
+                .with_context(|| format!("Failed to remove goal directory: {}", goal_dir.display()))?;
+        }
+
+        Ok(())
+    }
+
     // Task operations
 
     pub fn create_task(&mut self, task: Task) -> Result<()> {

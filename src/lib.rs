@@ -171,6 +171,10 @@ pub fn run(cli: Cli) -> Result<()> {
             let result = commands::show::run(&id, &db)?;
             output::show(&result, json)
         }
+        Commands::Clean { all, force } => {
+            let mut db = ensure_initialized()?;
+            commands::clean::run(all, force, &mut db)
+        }
         Commands::Ready { goal_id, json } => {
             let db = ensure_initialized()?;
             let tasks = commands::ready::run(&goal_id, &db)?;

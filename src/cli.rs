@@ -35,6 +35,17 @@ pub enum Commands {
         json: bool,
     },
 
+    /// Remove completed goals and their tasks
+    Clean {
+        /// Remove all completed goals without prompting
+        #[arg(long)]
+        all: bool,
+
+        /// Remove all goals regardless of status
+        #[arg(long)]
+        force: bool,
+    },
+
     /// Show status of goals and tasks
     Status {
         /// Show status of a specific goal
