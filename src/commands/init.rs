@@ -3,8 +3,8 @@ use std::fs::{self, OpenOptions};
 use std::io::Write;
 use std::path::Path;
 
-use crate::db::Database;
 use crate::RADIAL_DIR;
+use crate::db::Database;
 
 pub fn run(stealth: bool) -> Result<()> {
     let radial_dir = std::path::PathBuf::from(RADIAL_DIR);

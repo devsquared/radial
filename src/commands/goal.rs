@@ -7,21 +7,21 @@ use crate::models::{Goal, GoalState, Metrics};
 
 pub fn create(description: String, db: &mut Database) -> Result<Goal> {
     let now = Timestamp::now();
-    let goal = Goal {
-        id: generate_id(),
-        parent_id: None,
+    let goal = Goal::new(
+        generate_id(),
+        None,
         description,
-        state: GoalState::Pending,
-        created_at: now,
-        updated_at: now,
-        completed_at: None,
-        metrics: Metrics::default(),
-    };
+        GoalState::Pending,
+        now,
+        now,
+        None,
+        Metrics::default(),
+    );
 
-    db.create_goal(&goal)?;
+    db.create_goal(goal.clone())?;
     Ok(goal)
 }
 
-pub fn list(db: &Database) -> Result<Vec<Goal>> {
-    db.list_goals()
+pub fn list(db: &Database) -> Vec<Goal> {
+    db.list_goals().into_iter().cloned().collect()
 }
