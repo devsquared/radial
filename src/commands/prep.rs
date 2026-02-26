@@ -43,12 +43,17 @@ rd task list <goal_id>
 ### Task Lifecycle
 
 ```bash
-rd task start <task_id>                          # Mark as started
+rd task start <task_id> --assignee "agent-1"     # Claim and start (--assignee required)
 rd task complete <task_id> --result "Added login endpoint with JWT"
 rd task complete <task_id> --result "Done" --artifacts "src/auth.rs,src/jwt.rs"
 rd task fail <task_id>                           # Mark as failed
 rd task retry <task_id>                          # Retry a failed task
+rd task release <task_id>                        # Release claim, back to pending
 ```
+
+The `--assignee` flag is required when starting a task. It records who claimed the task,
+preventing two agents from working on the same thing. Use `release` to unclaim a task
+from any state (e.g. if you get stuck) so another agent can pick it up.
 
 ### Comments
 
@@ -82,12 +87,26 @@ rd show <id>                 # Full details of a goal or task (auto-detects)
 rd ready <goal_id>           # Show tasks ready to work on (unblocked)
 ```
 
+Filter by assignee to see only your tasks:
+
+```bash
+rd task list <goal_id> --assignee "agent-1"
+rd status --goal <goal_id> --assignee "agent-1"
+```
+
 ### Typical Workflow
 
 1. `rd goal create "Build feature X"` -> get goal_id
 2. `rd task create <goal_id> "Task A"` -> create tasks with dependencies
 3. `rd ready <goal_id>` -> see what's unblocked
-4. `rd task start <task_id>` -> claim a task
+4. `rd task start <task_id> --assignee "agent-1"` -> claim and start a task
 5. `rd task complete <task_id> --result "..."` -> finish it
-6. Repeat from step 3"#
+6. Repeat from step 3
+
+If you get stuck on a task, add a comment explaining why and release it:
+
+```bash
+rd task comment <task_id> "Blocked on missing API credentials"
+rd task release <task_id>
+```"#
 }
