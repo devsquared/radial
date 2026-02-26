@@ -120,14 +120,24 @@ pub fn create(
     Ok(task)
 }
 
-pub fn list(goal_id: &str, db: &Database) -> Result<Vec<Task>> {
+pub fn list(goal_id: &str, assignee: Option<&str>, db: &Database) -> Result<Vec<Task>> {
     db.get_goal(goal_id)
         .ok_or_else(|| anyhow!("Goal not found: {goal_id}"))?;
 
-    Ok(db.list_tasks(goal_id).into_iter().cloned().collect())
+    let tasks = db.list_tasks(goal_id);
+    let filtered: Vec<Task> = if let Some(assignee) = assignee {
+        tasks
+            .into_iter()
+            .filter(|t| t.assignee() == Some(assignee))
+            .cloned()
+            .collect()
+    } else {
+        tasks.into_iter().cloned().collect()
+    };
+    Ok(filtered)
 }
 
-pub fn start(task_id: &str, db: &mut Database) -> Result<Task> {
+pub fn start(task_id: &str, assignee: &str, db: &mut Database) -> Result<Task> {
     let task = db.get_task(task_id);
 
     if task.is_none() {
@@ -164,6 +174,7 @@ pub fn start(task_id: &str, db: &mut Database) -> Result<Task> {
             "Failed to start task: another process may have already started it"
         ));
     }
+    task.set_assignee(Some(assignee.to_owned()));
     task.write_file(&base)?;
 
     Ok(task.clone())
@@ -310,6 +321,24 @@ pub fn retry(task_id: &str, db: &mut Database) -> Result<Task> {
     let task = db.get_task_mut(task_id).unwrap();
     if !task.retry() {
         return Err(anyhow!("Failed to retry task: state may have changed"));
+    }
+    task.write_file(&base)?;
+
+    Ok(task.clone())
+}
+
+pub fn release(task_id: &str, db: &mut Database) -> Result<Task> {
+    if db.get_task(task_id).is_none() {
+        return Err(task_not_found_err(task_id, db));
+    }
+
+    let base = db.base_path().to_owned();
+    let task = db.get_task_mut(task_id).unwrap();
+    if !task.release() {
+        return Err(anyhow!(
+            "Task has no assignee to release. Current state: {}",
+            task.state().as_ref()
+        ));
     }
     task.write_file(&base)?;
 

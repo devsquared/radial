@@ -63,6 +63,8 @@ pub struct Task {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     blocked_by: Vec<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    assignee: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     result: Option<Outcome>,
     created_at: Timestamp,
     updated_at: Timestamp,
@@ -92,6 +94,7 @@ impl Task {
             contract,
             state,
             blocked_by,
+            assignee: None,
             result: None,
             created_at,
             updated_at,
@@ -170,6 +173,25 @@ impl Task {
         self.updated_at = Timestamp::now();
     }
 
+    pub fn assignee(&self) -> Option<&str> {
+        self.assignee.as_deref()
+    }
+
+    pub fn set_assignee(&mut self, assignee: Option<String>) {
+        self.assignee = assignee;
+        self.updated_at = Timestamp::now();
+    }
+
+    pub fn release(&mut self) -> bool {
+        if self.assignee.is_none() {
+            return false;
+        }
+        self.assignee = None;
+        self.state = TaskState::Pending;
+        self.updated_at = Timestamp::now();
+        true
+    }
+
     pub fn file_path(&self, base: &Path) -> PathBuf {
         base.join(&self.goal_id).join(format!("{}.toml", self.id))
     }
@@ -242,6 +264,10 @@ impl Render for Task {
         )?;
         writeln!(w, "  {}", &self.description)?;
 
+        if let Some(assignee) = &self.assignee {
+            writeln!(w, "  Assignee: {assignee}")?;
+        }
+
         match self.contract {
             Some(ref contract) => {
                 writeln!(w, "  Contract:")?;
@@ -284,6 +310,7 @@ mod tests {
             contract: None,
             state: TaskState::Pending,
             blocked_by: Vec::new(),
+            assignee: None,
             result: None,
             created_at: now,
             updated_at: now,
@@ -504,5 +531,64 @@ mod tests {
         let output = render_to_string(&task);
         assert!(output.contains("all good"));
         assert!(output.contains("out.txt"));
+    }
+
+    // -- assignee --
+
+    // Setting an assignee should store the value and bump updated_at.
+    #[rstest]
+    fn set_assignee_stores_value(mut task: Task) {
+        let before = task.updated_at;
+        task.set_assignee(Some("agent-1".to_string()));
+        assert_eq!(task.assignee(), Some("agent-1"));
+        assert!(task.updated_at >= before);
+    }
+
+    // Clearing an assignee should set it to None.
+    #[rstest]
+    fn set_assignee_clears_value(mut task: Task) {
+        task.assignee = Some("agent-1".to_string());
+        task.set_assignee(None);
+        assert_eq!(task.assignee(), None);
+    }
+
+    // -- release --
+
+    // Releasing an assigned in-progress task should clear assignee and set Pending.
+    #[rstest]
+    fn release_clears_assignee_and_sets_pending(mut task: Task) {
+        task.state = TaskState::InProgress;
+        task.assignee = Some("agent-1".to_string());
+        let before = task.updated_at;
+        assert!(task.release());
+        assert_eq!(task.state, TaskState::Pending);
+        assert_eq!(task.assignee(), None);
+        assert!(task.updated_at >= before);
+    }
+
+    // Releasing a failed task with an assignee should also work.
+    #[rstest]
+    fn release_works_from_failed(mut task: Task) {
+        task.state = TaskState::Failed;
+        task.assignee = Some("agent-1".to_string());
+        assert!(task.release());
+        assert_eq!(task.state, TaskState::Pending);
+        assert_eq!(task.assignee(), None);
+    }
+
+    // Releasing a task with no assignee should fail.
+    #[rstest]
+    fn release_rejects_unassigned(mut task: Task) {
+        task.state = TaskState::InProgress;
+        assert!(!task.release());
+        assert_eq!(task.state, TaskState::InProgress);
+    }
+
+    // Render should include assignee when set.
+    #[rstest]
+    fn render_includes_assignee(mut task: Task) {
+        task.assignee = Some("agent-1".to_string());
+        let output = render_to_string(&task);
+        assert!(output.contains("Assignee: agent-1"));
     }
 }

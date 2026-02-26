@@ -68,6 +68,10 @@ pub enum Commands {
         #[arg(long)]
         task: Option<String>,
 
+        /// Filter tasks by assignee
+        #[arg(long)]
+        assignee: Option<String>,
+
         /// Output as JSON
         #[arg(long)]
         json: bool,
@@ -150,12 +154,20 @@ pub enum TaskCommands {
         /// Show comments on tasks
         #[arg(short, long)]
         verbose: bool,
+
+        /// Filter tasks by assignee
+        #[arg(long)]
+        assignee: Option<String>,
     },
 
     /// Mark a task as started
     Start {
         /// The task ID to start
         task_id: String,
+
+        /// Who is claiming this task
+        #[arg(long)]
+        assignee: String,
     },
 
     /// Mark a task as completed
@@ -189,6 +201,12 @@ pub enum TaskCommands {
     /// Retry a failed task
     Retry {
         /// The task ID to retry
+        task_id: String,
+    },
+
+    /// Release a claimed task back to pending
+    Release {
+        /// The task ID to release
         task_id: String,
     },
 

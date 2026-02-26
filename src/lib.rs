@@ -109,15 +109,16 @@ fn run_task(task_cmd: TaskCommands, db: &mut Database) -> Result<()> {
             goal_id,
             json,
             verbose,
+            assignee,
         } => {
-            let tasks = commands::task::list(&goal_id, db)?;
+            let tasks = commands::task::list(&goal_id, assignee.as_deref(), db)?;
             let goal = db
                 .get_goal(&goal_id)
                 .ok_or_else(|| anyhow!("Goal not found: {goal_id}"))?;
             output::task_list(&tasks, goal, verbose, json)
         }
-        TaskCommands::Start { task_id } => {
-            let task = commands::task::start(&task_id, db)?;
+        TaskCommands::Start { task_id, assignee } => {
+            let task = commands::task::start(&task_id, &assignee, db)?;
             output::task_started(&task)
         }
         TaskCommands::Complete {
@@ -138,6 +139,10 @@ fn run_task(task_cmd: TaskCommands, db: &mut Database) -> Result<()> {
         TaskCommands::Retry { task_id } => {
             let task = commands::task::retry(&task_id, db)?;
             output::task_retry(&task)
+        }
+        TaskCommands::Release { task_id } => {
+            let task = commands::task::release(&task_id, db)?;
+            output::task_released(&task)
         }
         TaskCommands::Comment { task_id, text } => {
             let task = commands::task::comment(&task_id, text, db)?;
@@ -193,9 +198,14 @@ pub fn run(cli: Cli) -> Result<()> {
                 }
             }
         }
-        Commands::Status { goal, task, json } => {
+        Commands::Status {
+            goal,
+            task,
+            assignee,
+            json,
+        } => {
             let db = ensure_initialized()?;
-            let result = commands::status::run(goal, task, &db)?;
+            let result = commands::status::run(goal, task, assignee, &db)?;
             output::status(&result, json)
         }
         Commands::Show { id, json } => {
