@@ -124,14 +124,14 @@ pub fn create(
     Ok(task)
 }
 
-pub fn list(goal_id: &str, priority: Option<Priority>, db: &Database) -> Result<Vec<Task>> {
+pub fn list(goal_id: &str, priority: Option<&Priority>, db: &Database) -> Result<Vec<Task>> {
     db.get_goal(goal_id)
         .ok_or_else(|| anyhow!("Goal not found: {goal_id}"))?;
 
     let mut tasks: Vec<Task> = db
         .list_tasks(goal_id)
         .into_iter()
-        .filter(|t| priority.is_none_or(|p| t.priority() == p))
+        .filter(|t| priority.is_none_or(|p| t.priority() == *p))
         .cloned()
         .collect();
     tasks.sort_by_key(Task::priority);

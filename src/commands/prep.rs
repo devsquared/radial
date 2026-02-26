@@ -29,6 +29,9 @@ Tasks are units of work under a goal. They can have dependencies and contracts.
 # Create a task
 rd task create <goal_id> "Write login handler"
 
+# With priority (p0, p1, p2, p3 — defaults to p2)
+rd task create <goal_id> "Fix critical bug" --priority p0
+
 # With contracts and dependencies
 rd task create <goal_id> "Parse config" \
   --receives "config.yaml file path" \
@@ -38,17 +41,25 @@ rd task create <goal_id> "Parse config" \
 
 # List tasks for a goal
 rd task list <goal_id>
+
+# Filter tasks by priority
+rd task list <goal_id> --priority p0
 ```
 
 ### Task Lifecycle
 
 ```bash
-rd task start <task_id>                          # Mark as started
+rd task start <task_id> --assignee "agent-1"     # Claim and start (--assignee required)
 rd task complete <task_id> --result "Added login endpoint with JWT"
 rd task complete <task_id> --result "Done" --artifacts "src/auth.rs,src/jwt.rs"
 rd task fail <task_id>                           # Mark as failed
 rd task retry <task_id>                          # Retry a failed task
+rd task release <task_id>                        # Release claim, back to pending
 ```
+
+The `--assignee` flag is required when starting a task. It records who claimed the task,
+preventing two agents/users from working on the same thing. Use `release` to unclaim a task
+from any state (e.g. if you get stuck) so another agent can pick it up.
 
 ### Comments
 
@@ -79,7 +90,15 @@ rd status                    # Compact overview of all goals
 rd status --goal <goal_id>   # Compact status of a goal and its tasks
 rd status --task <task_id>   # Compact status of a task
 rd show <id>                 # Full details of a goal or task (auto-detects)
-rd ready <goal_id>           # Show tasks ready to work on (unblocked)
+rd ready <goal_id>                # Show ready tasks, sorted by priority (p0 first)
+rd ready <goal_id> --priority p0  # Ready tasks filtered by priority
+```
+
+Filter by assignee to see only your tasks:
+
+```bash
+rd task list <goal_id> --assignee "agent-1"
+rd status --goal <goal_id> --assignee "agent-1"
 ```
 
 ### Typical Workflow
@@ -87,7 +106,14 @@ rd ready <goal_id>           # Show tasks ready to work on (unblocked)
 1. `rd goal create "Build feature X"` -> get goal_id
 2. `rd task create <goal_id> "Task A"` -> create tasks with dependencies
 3. `rd ready <goal_id>` -> see what's unblocked
-4. `rd task start <task_id>` -> claim a task
+4. `rd task start <task_id> --assignee "agent-1"` -> claim and start a task
 5. `rd task complete <task_id> --result "..."` -> finish it
-6. Repeat from step 3"#
+6. Repeat from step 3
+
+If you get stuck on a task, add a comment explaining why and release it:
+
+```bash
+rd task comment <task_id> "Blocked on missing API credentials"
+rd task release <task_id>
+```"#
 }

@@ -1,5 +1,7 @@
 use clap::{Parser, Subcommand};
 
+use crate::models::Priority;
+
 #[derive(Parser)]
 #[command(name = "radial")]
 #[command(about = "Task orchestration for LLM agents", long_about = None)]
@@ -80,7 +82,7 @@ pub enum Commands {
 
         /// Filter by priority level (p0, p1, p2, p3)
         #[arg(long)]
-        priority: Option<String>,
+        priority: Option<Priority>,
 
         /// Output as JSON
         #[arg(long)]
@@ -123,7 +125,7 @@ pub enum TaskCommands {
 
         /// Priority level (p0, p1, p2, p3). Defaults to p2
         #[arg(long)]
-        priority: Option<String>,
+        priority: Option<Priority>,
 
         /// What this task receives (contract)
         #[arg(long)]
@@ -153,7 +155,7 @@ pub enum TaskCommands {
 
         /// Filter by priority level (p0, p1, p2, p3)
         #[arg(long)]
-        priority: Option<String>,
+        priority: Option<Priority>,
 
         /// Output as JSON
         #[arg(long)]
@@ -237,7 +239,7 @@ pub enum EditCommands {
 
         /// New priority level (p0, p1, p2, p3)
         #[arg(long)]
-        priority: Option<String>,
+        priority: Option<Priority>,
 
         /// New receives (contract)
         #[arg(long)]
