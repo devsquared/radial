@@ -134,7 +134,7 @@ pub fn list(goal_id: &str, priority: Option<Priority>, db: &Database) -> Result<
         .filter(|t| priority.is_none_or(|p| t.priority() == p))
         .cloned()
         .collect();
-    tasks.sort_by_key(|t| t.priority());
+    tasks.sort_by_key(Task::priority);
     Ok(tasks)
 }
 

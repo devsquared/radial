@@ -49,7 +49,7 @@ cargo nextest run
 Do not move on until both pass.
 
 ### Clippy
-Run frequently:
+Run clippy frequently. Must fix warnings before finishing:
 ```bash
 cargo clippy --all-targets -- -D warnings -W clippy::pedantic
 ```
