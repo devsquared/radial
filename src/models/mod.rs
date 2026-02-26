@@ -8,4 +8,4 @@ pub use comment::Comment;
 pub use contract::Contract;
 pub use goal::{Goal, GoalState, Metrics};
 pub use outcome::Outcome;
-pub use task::{Task, TaskMetrics, TaskState};
+pub use task::{Priority, Task, TaskMetrics, TaskState};

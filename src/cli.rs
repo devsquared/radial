@@ -78,6 +78,10 @@ pub enum Commands {
         /// The goal ID to check for ready tasks
         goal_id: String,
 
+        /// Filter by priority level (p0, p1, p2, p3)
+        #[arg(long)]
+        priority: Option<String>,
+
         /// Output as JSON
         #[arg(long)]
         json: bool,
@@ -117,6 +121,10 @@ pub enum TaskCommands {
         /// Task description
         description: String,
 
+        /// Priority level (p0, p1, p2, p3). Defaults to p2
+        #[arg(long)]
+        priority: Option<String>,
+
         /// What this task receives (contract)
         #[arg(long)]
         receives: Option<String>,
@@ -142,6 +150,10 @@ pub enum TaskCommands {
     List {
         /// The goal ID to list tasks for
         goal_id: String,
+
+        /// Filter by priority level (p0, p1, p2, p3)
+        #[arg(long)]
+        priority: Option<String>,
 
         /// Output as JSON
         #[arg(long)]
@@ -222,6 +234,10 @@ pub enum EditCommands {
         /// New description
         #[arg(long)]
         description: Option<String>,
+
+        /// New priority level (p0, p1, p2, p3)
+        #[arg(long)]
+        priority: Option<String>,
 
         /// New receives (contract)
         #[arg(long)]

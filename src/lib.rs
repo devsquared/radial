@@ -12,9 +12,11 @@ pub mod output;
 
 use anyhow::{Context, Result, anyhow};
 use std::path::PathBuf;
+use std::str::FromStr;
 
 use cli::{Cli, Commands, EditCommands, GoalCommands, TaskCommands};
 use db::Database;
+use models::Priority;
 
 pub const RADIAL_DIR: &str = ".radial";
 pub const REDIRECT_FILE: &str = "redirect";
@@ -70,6 +72,14 @@ fn ensure_initialized() -> Result<Database> {
     Database::open(&radial_dir).context("Failed to open database")
 }
 
+fn parse_priority(s: Option<String>) -> Result<Option<Priority>> {
+    s.map(|s| {
+        Priority::from_str(&s.to_lowercase())
+            .map_err(|_| anyhow!("Invalid priority: {s}\nValid values: p0, p1, p2, p3"))
+    })
+    .transpose()
+}
+
 fn run_goal(goal_cmd: GoalCommands, db: &mut Database) -> Result<()> {
     match goal_cmd {
         GoalCommands::Create { description, json } => {
@@ -88,15 +98,18 @@ fn run_task(task_cmd: TaskCommands, db: &mut Database) -> Result<()> {
         TaskCommands::Create {
             goal_id,
             description,
+            priority,
             receives,
             produces,
             verify,
             blocked_by,
             json,
         } => {
+            let prio = parse_priority(priority)?.unwrap_or_default();
             let task = commands::task::create(
                 &goal_id,
                 description,
+                prio,
                 receives,
                 produces,
                 verify,
@@ -107,10 +120,12 @@ fn run_task(task_cmd: TaskCommands, db: &mut Database) -> Result<()> {
         }
         TaskCommands::List {
             goal_id,
+            priority,
             json,
             verbose,
         } => {
-            let tasks = commands::task::list(&goal_id, db)?;
+            let prio = parse_priority(priority)?;
+            let tasks = commands::task::list(&goal_id, prio, db)?;
             let goal = db
                 .get_goal(&goal_id)
                 .ok_or_else(|| anyhow!("Goal not found: {goal_id}"))?;
@@ -175,14 +190,17 @@ pub fn run(cli: Cli) -> Result<()> {
                 EditCommands::Task {
                     task_id,
                     description,
+                    priority,
                     receives,
                     produces,
                     verify,
                     blocked_by,
                 } => {
+                    let prio = parse_priority(priority)?;
                     let task = commands::edit::task(
                         &task_id,
                         description,
+                        prio,
                         receives,
                         produces,
                         verify,
@@ -207,9 +225,14 @@ pub fn run(cli: Cli) -> Result<()> {
             let mut db = ensure_initialized()?;
             commands::clean::run(all, force, &mut db)
         }
-        Commands::Ready { goal_id, json } => {
+        Commands::Ready {
+            goal_id,
+            priority,
+            json,
+        } => {
             let db = ensure_initialized()?;
-            let tasks = commands::ready::run(&goal_id, &db)?;
+            let prio = parse_priority(priority)?;
+            let tasks = commands::ready::run(&goal_id, prio, &db)?;
             let goal = db
                 .get_goal(&goal_id)
                 .ok_or_else(|| anyhow!("Goal not found: {goal_id}"))?;
