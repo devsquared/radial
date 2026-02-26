@@ -124,17 +124,12 @@ pub fn list(goal_id: &str, assignee: Option<&str>, db: &Database) -> Result<Vec<
     db.get_goal(goal_id)
         .ok_or_else(|| anyhow!("Goal not found: {goal_id}"))?;
 
-    let tasks = db.list_tasks(goal_id);
-    let filtered: Vec<Task> = if let Some(assignee) = assignee {
-        tasks
-            .into_iter()
-            .filter(|t| t.assignee() == Some(assignee))
-            .cloned()
-            .collect()
-    } else {
-        tasks.into_iter().cloned().collect()
-    };
-    Ok(filtered)
+    Ok(db
+        .list_tasks(goal_id)
+        .into_iter()
+        .filter(|t| assignee.is_none_or(|a| t.assignee() == Some(a)))
+        .cloned()
+        .collect())
 }
 
 pub fn start(task_id: &str, assignee: &str, db: &mut Database) -> Result<Task> {
