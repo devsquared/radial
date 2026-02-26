@@ -192,6 +192,12 @@ pub enum TaskCommands {
         task_id: String,
     },
 
+    /// Delete a pending task
+    Delete {
+        /// The task ID to delete
+        task_id: String,
+    },
+
     /// Add a comment to a task
     Comment {
         /// The task ID to comment on

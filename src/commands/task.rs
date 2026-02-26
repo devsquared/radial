@@ -316,6 +316,24 @@ pub fn retry(task_id: &str, db: &mut Database) -> Result<Task> {
     Ok(task.clone())
 }
 
+pub fn delete(task_id: &str, db: &mut Database) -> Result<Task> {
+    let task = db
+        .get_task(task_id)
+        .ok_or_else(|| task_not_found_err(task_id, db))?;
+
+    if task.state() != TaskState::Pending {
+        return Err(anyhow!(
+            "Task must be in 'pending' state to delete. Current state: {}",
+            task.state().as_ref()
+        ));
+    }
+
+    let task = task.clone();
+    db.delete_task(task_id, task.goal_id())?;
+
+    Ok(task)
+}
+
 pub fn comment(task_id: &str, text: String, db: &mut Database) -> Result<Task> {
     if db.get_task(task_id).is_none() {
         return Err(task_not_found_err(task_id, db));

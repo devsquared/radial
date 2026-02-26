@@ -139,6 +139,10 @@ fn run_task(task_cmd: TaskCommands, db: &mut Database) -> Result<()> {
             let task = commands::task::retry(&task_id, db)?;
             output::task_retry(&task)
         }
+        TaskCommands::Delete { task_id } => {
+            let task = commands::task::delete(&task_id, db)?;
+            output::task_deleted(&task)
+        }
         TaskCommands::Comment { task_id, text } => {
             let task = commands::task::comment(&task_id, text, db)?;
             output::task_commented(&task, false)

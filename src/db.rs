@@ -176,6 +176,21 @@ impl Database {
         self.tasks.get(id)
     }
 
+    /// Delete a task from memory and disk.
+    /// Removes from memory if present, and always attempts to clean up the
+    /// file on disk in case memory and disk are out of sync.
+    pub fn delete_task(&mut self, task_id: &str, goal_id: &str) -> Result<()> {
+        self.tasks.remove(task_id);
+
+        let path = self.path.join(goal_id).join(format!("{task_id}.toml"));
+        if path.exists() {
+            fs::remove_file(&path)
+                .with_context(|| format!("Failed to remove task file: {}", path.display()))?;
+        }
+
+        Ok(())
+    }
+
     pub fn get_task_mut(&mut self, id: &str) -> Option<&mut Task> {
         self.tasks.get_mut(id)
     }
@@ -534,6 +549,46 @@ mod tests {
         let metrics = db.compute_goal_metrics("nonexistent");
         assert_eq!(metrics.task_count(), 0);
         assert_eq!(metrics.total_tokens(), 0);
+    }
+
+    // -- delete_task --
+
+    // Deleting a pending task should remove it from memory and delete
+    // the TOML file from disk.
+    #[rstest]
+    fn delete_task_removes_from_memory_and_disk(db_with_goal_and_task: (TempDir, Database)) {
+        let (dir, mut db) = db_with_goal_and_task;
+        let task_path = dir.path().join("g1").join("t1.toml");
+        assert!(task_path.exists());
+
+        db.delete_task("t1", "g1").unwrap();
+
+        assert!(db.get_task("t1").is_none());
+        assert!(!task_path.exists());
+    }
+
+    // Deleting a task that isn't in memory but has a file on disk should
+    // still clean up the file (out-of-sync recovery).
+    #[rstest]
+    fn delete_task_cleans_orphaned_file(db_with_goal_and_task: (TempDir, Database)) {
+        let (dir, mut db) = db_with_goal_and_task;
+        let task_path = dir.path().join("g1").join("t1.toml");
+        assert!(task_path.exists());
+
+        // Simulate out-of-sync: remove from memory but leave file
+        db.tasks.remove("t1");
+        assert!(task_path.exists());
+
+        db.delete_task("t1", "g1").unwrap();
+        assert!(!task_path.exists());
+    }
+
+    // Deleting a task that doesn't exist in memory or on disk should
+    // succeed without error (idempotent).
+    #[rstest]
+    fn delete_task_nonexistent_succeeds(db: (TempDir, Database)) {
+        let (_dir, mut db) = db;
+        assert!(db.delete_task("nope", "g1").is_ok());
     }
 
     // -- open / reload --

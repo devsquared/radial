@@ -64,6 +64,11 @@ Always format before committing:
 cargo fmt
 ```
 
+### CLI Changes
+When adding or changing a CLI command, check whether `rd prep` output needs to be
+updated. The prep command generates a guide for LLM agents, so it must stay in sync
+with the available commands.
+
 ## Dependencies
 
 - `clap` (derive) — CLI parsing

@@ -238,6 +238,18 @@ pub fn task_retry(task: &Task) -> Result<()> {
     Ok(())
 }
 
+pub fn task_deleted(task: &Task) -> Result<()> {
+    let mut w = io::stdout().lock();
+    writeln!(
+        w,
+        "{} {}",
+        style("Deleted task:").red(),
+        style(task.id()).cyan().bold()
+    )?;
+    writeln!(w, "  {}", truncate(task.description(), 80))?;
+    Ok(())
+}
+
 pub fn task_commented(task: &Task, json: bool) -> Result<()> {
     json_or(task, json, |w| {
         writeln!(
