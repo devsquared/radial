@@ -4,6 +4,7 @@ use anyhow::Result;
 use console::style;
 use serde::Serialize;
 
+use crate::commands::compact::CompactCandidate;
 use crate::commands::list::GoalWithTasks;
 use crate::commands::show::ShowResult;
 use crate::commands::status::{GoalSummary, StatusResult};
@@ -408,6 +409,23 @@ fn show_task(task: &Task, json: bool) -> Result<()> {
         )?;
         writeln!(w)?;
 
+        if task.compacted() {
+            writeln!(w, "{}", style("[compacted]").dim())?;
+            if let Some(summary) = task.summary() {
+                writeln!(w)?;
+                writeln!(w, "{}", style("Summary").bold())?;
+                for line in summary.lines() {
+                    writeln!(w, "  {line}")?;
+                }
+            }
+            writeln!(w)?;
+            field(w, "Priority", task.priority().as_ref())?;
+            field(w, "Goal", task.goal_id())?;
+            field(w, "Created", &task.created_at().to_string())?;
+            field(w, "Updated", &task.updated_at().to_string())?;
+            return Ok(());
+        }
+
         writeln!(w, "{}", style("Description").bold())?;
         for line in task.description().lines() {
             writeln!(w, "  {line}")?;
@@ -665,6 +683,49 @@ pub fn list(results: &[GoalWithTasks], json: bool) -> Result<()> {
 pub fn prep(text: &str) -> Result<()> {
     let mut w = io::stdout().lock();
     writeln!(w, "{text}")?;
+    Ok(())
+}
+
+// -- Compact --
+
+pub fn compact_analyze(candidates: &[CompactCandidate], json: bool) -> Result<()> {
+    json_or(candidates, json, |w| {
+        if candidates.is_empty() {
+            writeln!(w, "No tasks eligible for compaction.")?;
+            return Ok(());
+        }
+
+        writeln!(w, "{} task(s) eligible for compaction:\n", candidates.len())?;
+        writeln!(
+            w,
+            "{:<10} {:<10} {:<13} {}",
+            style("ID").bold().underlined(),
+            style("GOAL").bold().underlined(),
+            style("STATE").bold().underlined(),
+            style("DESCRIPTION").bold().underlined(),
+        )?;
+        for c in candidates {
+            writeln!(
+                w,
+                "{:<10} {:<10} {:<13} {}",
+                style(&c.id).cyan(),
+                style(&c.goal_id).dim(),
+                state_styled(&c.state),
+                truncate(&c.description, 60),
+            )?;
+        }
+        Ok(())
+    })
+}
+
+pub fn compact_apply(task_id: &str) -> Result<()> {
+    let mut w = io::stdout().lock();
+    writeln!(
+        w,
+        "{} {}",
+        style("Compacted task:").green(),
+        style(task_id).cyan().bold()
+    )?;
     Ok(())
 }
 

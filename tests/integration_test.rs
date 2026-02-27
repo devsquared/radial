@@ -1255,3 +1255,268 @@ fn test_release_unassigned_task_fails() {
     assert!(result.is_err(), "Release on unassigned task should fail");
     assert!(result.unwrap_err().contains("no assignee"));
 }
+
+// -- Compaction tests --
+
+/// Helper: create a goal, create a task with contract, start it, and complete it.
+/// Returns (goal_id, task_id).
+fn create_completed_task(env: &TestEnv, label: &str) -> (String, String) {
+    let output = env
+        .run(&["goal", "create", &format!("{label} goal")])
+        .expect("Create goal failed");
+    let goal_id = output
+        .lines()
+        .find(|line| line.contains("Created goal:"))
+        .and_then(|line| line.split_whitespace().nth(2))
+        .unwrap()
+        .to_string();
+
+    let output = env
+        .run(&[
+            "task",
+            "create",
+            &goal_id,
+            &format!("{label} task"),
+            "--receives",
+            "Input data",
+            "--produces",
+            "Output data",
+            "--verify",
+            "Check output",
+        ])
+        .expect("Create task failed");
+    let task_id = output
+        .lines()
+        .find(|line| line.contains("Created task:"))
+        .and_then(|line| line.split_whitespace().nth(2))
+        .unwrap()
+        .to_string();
+
+    env.run(&["task", "start", &task_id, "--assignee", "agent-1"])
+        .expect("Start failed");
+    env.run(&["task", "complete", &task_id, "--result", "Done"])
+        .expect("Complete failed");
+
+    (goal_id, task_id)
+}
+
+#[test]
+fn test_compact_analyze_empty() {
+    let env = TestEnv::new();
+    env.run(&["init"]).expect("Init failed");
+
+    // No tasks at all
+    let output = env
+        .run(&["compact", "analyze"])
+        .expect("Compact analyze failed");
+    assert!(output.contains("No tasks eligible"));
+}
+
+#[test]
+fn test_compact_analyze_finds_completed_tasks() {
+    let env = TestEnv::new();
+    env.run(&["init"]).expect("Init failed");
+
+    let (_goal_id, task_id) = create_completed_task(&env, "Compact");
+
+    let output = env
+        .run(&["compact", "analyze"])
+        .expect("Compact analyze failed");
+    assert!(output.contains(&task_id));
+    assert!(output.contains("1 task(s) eligible"));
+}
+
+#[test]
+fn test_compact_analyze_json() {
+    let env = TestEnv::new();
+    env.run(&["init"]).expect("Init failed");
+
+    let (goal_id, task_id) = create_completed_task(&env, "JSON compact");
+
+    let output = env
+        .run(&["compact", "analyze", "--json"])
+        .expect("Compact analyze --json failed");
+    let parsed: Value = serde_json::from_str(&output).expect("Should be valid JSON");
+    assert!(parsed.is_array());
+    let candidates = parsed.as_array().unwrap();
+    assert_eq!(candidates.len(), 1);
+    assert_eq!(candidates[0]["id"], task_id);
+    assert_eq!(candidates[0]["goal_id"], goal_id);
+    assert_eq!(candidates[0]["state"], "completed");
+}
+
+#[test]
+fn test_compact_analyze_filter_by_goal() {
+    let env = TestEnv::new();
+    env.run(&["init"]).expect("Init failed");
+
+    let (goal_id_1, task_id_1) = create_completed_task(&env, "Goal1");
+    let (_goal_id_2, task_id_2) = create_completed_task(&env, "Goal2");
+
+    // All goals
+    let output = env
+        .run(&["compact", "analyze", "--json"])
+        .expect("Analyze all failed");
+    let parsed: Value = serde_json::from_str(&output).unwrap();
+    assert_eq!(parsed.as_array().unwrap().len(), 2);
+
+    // Filter to goal 1
+    let output = env
+        .run(&["compact", "analyze", "--goal", &goal_id_1, "--json"])
+        .expect("Analyze filtered failed");
+    let parsed: Value = serde_json::from_str(&output).unwrap();
+    let candidates = parsed.as_array().unwrap();
+    assert_eq!(candidates.len(), 1);
+    assert_eq!(candidates[0]["id"], task_id_1);
+
+    // Ensure task_id_2 is not in the filtered result (just for clarity)
+    assert_ne!(candidates[0]["id"], task_id_2);
+}
+
+#[test]
+fn test_compact_apply_success() {
+    let env = TestEnv::new();
+    env.run(&["init"]).expect("Init failed");
+
+    let (_goal_id, task_id) = create_completed_task(&env, "Apply");
+
+    let output = env
+        .run(&[
+            "compact",
+            "apply",
+            &task_id,
+            "--summary",
+            "Implemented the apply feature successfully.",
+        ])
+        .expect("Compact apply failed");
+    assert!(output.contains("Compacted task:"));
+    assert!(output.contains(&task_id));
+
+    // After compaction, show should display summary instead of full detail
+    let output = env.run(&["show", &task_id]).expect("Show failed");
+    assert!(output.contains("[compacted]"));
+    assert!(output.contains("Implemented the apply feature successfully."));
+    assert!(!output.contains("Input data")); // contract should be gone
+    assert!(!output.contains("Check output")); // verify should be gone
+
+    // JSON should have compacted=true and summary
+    let output = env
+        .run(&["show", &task_id, "--json"])
+        .expect("Show --json failed");
+    let parsed: Value = serde_json::from_str(&output).expect("Should be valid JSON");
+    assert_eq!(parsed["compacted"], true);
+    assert_eq!(
+        parsed["summary"],
+        "Implemented the apply feature successfully."
+    );
+    assert!(parsed["contract"].is_null());
+    assert_eq!(parsed["description"], "[compacted]");
+}
+
+#[test]
+fn test_compact_apply_already_compacted() {
+    let env = TestEnv::new();
+    env.run(&["init"]).expect("Init failed");
+
+    let (_goal_id, task_id) = create_completed_task(&env, "Double");
+
+    env.run(&["compact", "apply", &task_id, "--summary", "First summary"])
+        .expect("First compact should succeed");
+
+    // Second compact should fail
+    let result = env.run(&["compact", "apply", &task_id, "--summary", "Second summary"]);
+    assert!(result.is_err());
+    assert!(result.unwrap_err().contains("already compacted"));
+}
+
+#[test]
+fn test_compact_apply_rejects_pending_task() {
+    let env = TestEnv::new();
+    env.run(&["init"]).expect("Init failed");
+
+    let output = env
+        .run(&["goal", "create", "Reject test goal"])
+        .expect("Create goal failed");
+    let goal_id = output
+        .lines()
+        .find(|line| line.contains("Created goal:"))
+        .and_then(|line| line.split_whitespace().nth(2))
+        .unwrap();
+
+    let output = env
+        .run(&[
+            "task",
+            "create",
+            goal_id,
+            "Pending task",
+            "--receives",
+            "In",
+            "--produces",
+            "Out",
+            "--verify",
+            "Check",
+        ])
+        .expect("Create task failed");
+    let task_id = output
+        .lines()
+        .find(|line| line.contains("Created task:"))
+        .and_then(|line| line.split_whitespace().nth(2))
+        .unwrap();
+
+    let result = env.run(&["compact", "apply", task_id, "--summary", "Should not work"]);
+    assert!(result.is_err());
+    assert!(result.unwrap_err().contains("only completed or failed"));
+}
+
+#[test]
+fn test_compact_not_in_analyze_after_compaction() {
+    let env = TestEnv::new();
+    env.run(&["init"]).expect("Init failed");
+
+    let (_goal_id, task_id) = create_completed_task(&env, "Disappear");
+
+    // Should appear in analyze
+    let output = env
+        .run(&["compact", "analyze", "--json"])
+        .expect("Analyze failed");
+    let parsed: Value = serde_json::from_str(&output).unwrap();
+    assert_eq!(parsed.as_array().unwrap().len(), 1);
+
+    // Compact it
+    env.run(&["compact", "apply", &task_id, "--summary", "Done and dusted"])
+        .expect("Compact failed");
+
+    // Should no longer appear in analyze
+    let output = env
+        .run(&["compact", "analyze", "--json"])
+        .expect("Analyze failed");
+    let parsed: Value = serde_json::from_str(&output).unwrap();
+    assert_eq!(parsed.as_array().unwrap().len(), 0);
+}
+
+#[test]
+fn test_prep_shows_compaction_advisory() {
+    let env = TestEnv::new();
+    env.run(&["init"]).expect("Init failed");
+
+    // Prep with no candidates should not mention compaction
+    let output = env.run(&["prep"]).expect("Prep failed");
+    assert!(!output.contains("Compaction"));
+
+    // Create a completed task
+    let (_goal_id, task_id) = create_completed_task(&env, "Prep");
+
+    // Prep should now mention compaction
+    let output = env.run(&["prep"]).expect("Prep failed");
+    assert!(output.contains("Compaction"));
+    assert!(output.contains("1 task(s) eligible for compaction"));
+    assert!(output.contains("rd compact analyze"));
+
+    // Compact the task
+    env.run(&["compact", "apply", &task_id, "--summary", "Done"])
+        .expect("Compact failed");
+
+    // Prep should no longer mention compaction
+    let output = env.run(&["prep"]).expect("Prep failed");
+    assert!(!output.contains("Compaction"));
+}

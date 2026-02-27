@@ -95,6 +95,10 @@ pub enum Commands {
 
     /// Output a preparation guide for LLM agents
     Prep,
+
+    /// Compact completed/failed tasks into summaries
+    #[command(subcommand)]
+    Compact(CompactCommands),
 }
 
 #[derive(Subcommand)]
@@ -280,5 +284,29 @@ pub enum EditCommands {
         /// Add a blocked-by dependency
         #[arg(long, value_delimiter = ',')]
         blocked_by: Option<Vec<String>>,
+    },
+}
+
+#[derive(Subcommand)]
+pub enum CompactCommands {
+    /// List tasks eligible for compaction
+    Analyze {
+        /// Filter to a specific goal
+        #[arg(long)]
+        goal: Option<String>,
+
+        /// Output as JSON
+        #[arg(long)]
+        json: bool,
+    },
+
+    /// Apply a summary to a completed/failed task, compacting it
+    Apply {
+        /// The task ID to compact
+        task_id: String,
+
+        /// The summary to replace the task's detailed content
+        #[arg(long)]
+        summary: String,
     },
 }

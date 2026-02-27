@@ -1,6 +1,7 @@
 #![allow(clippy::needless_pass_by_value)]
 
 pub mod clean;
+pub mod compact;
 pub mod edit;
 pub mod goal;
 pub mod init;
