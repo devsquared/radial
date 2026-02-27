@@ -4,7 +4,9 @@ use jiff::Timestamp;
 use crate::db::Database;
 use crate::helpers::find_similar_id;
 use crate::id::generate_id;
-use crate::models::{Comment, Contract, GoalState, Outcome, Task, TaskMetrics, TaskState};
+use crate::models::{
+    Comment, Contract, GoalState, Outcome, Priority, Task, TaskMetrics, TaskState,
+};
 
 /// Result of completing a task, including any unblocked tasks.
 #[derive(Debug)]
@@ -31,6 +33,7 @@ fn task_not_found_err(task_id: &str, db: &Database) -> anyhow::Error {
 pub fn create(
     goal_id: &str,
     description: String,
+    priority: Priority,
     receives: Option<String>,
     produces: Option<String>,
     verify: Option<String>,
@@ -98,6 +101,7 @@ pub fn create(
         generate_id(),
         goal_id_owned.clone(),
         description,
+        priority,
         contract,
         state,
         blocked_by_ids,
@@ -120,16 +124,24 @@ pub fn create(
     Ok(task)
 }
 
-pub fn list(goal_id: &str, assignee: Option<&str>, db: &Database) -> Result<Vec<Task>> {
+pub fn list(
+    goal_id: &str,
+    priority: Option<&Priority>,
+    assignee: Option<&str>,
+    db: &Database,
+) -> Result<Vec<Task>> {
     db.get_goal(goal_id)
         .ok_or_else(|| anyhow!("Goal not found: {goal_id}"))?;
 
-    Ok(db
+    let mut tasks: Vec<Task> = db
         .list_tasks(goal_id)
         .into_iter()
+        .filter(|t| priority.is_none_or(|p| t.priority() == *p))
         .filter(|t| assignee.is_none_or(|a| t.assignee() == Some(a)))
         .cloned()
-        .collect())
+        .collect();
+    tasks.sort_by_key(Task::priority);
+    Ok(tasks)
 }
 
 pub fn start(task_id: &str, assignee: &str, db: &mut Database) -> Result<Task> {
@@ -338,6 +350,24 @@ pub fn release(task_id: &str, db: &mut Database) -> Result<Task> {
     task.write_file(&base)?;
 
     Ok(task.clone())
+}
+
+pub fn delete(task_id: &str, db: &mut Database) -> Result<Task> {
+    let task = db
+        .get_task(task_id)
+        .ok_or_else(|| task_not_found_err(task_id, db))?;
+
+    if task.state() != TaskState::Pending {
+        return Err(anyhow!(
+            "Task must be in 'pending' state to delete. Current state: {}",
+            task.state().as_ref()
+        ));
+    }
+
+    let task = task.clone();
+    db.delete_task(task_id, task.goal_id())?;
+
+    Ok(task)
 }
 
 pub fn comment(task_id: &str, text: String, db: &mut Database) -> Result<Task> {

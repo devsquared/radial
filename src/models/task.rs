@@ -11,6 +11,20 @@ use super::{Comment, Contract, Outcome};
 use crate::db::atomic_write;
 use crate::output::Render;
 
+#[derive(
+    Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord, AsRefStr, EnumString,
+)]
+#[serde(rename_all = "lowercase")]
+#[strum(serialize_all = "lowercase")]
+#[derive(Default, clap::ValueEnum)]
+pub enum Priority {
+    P0,
+    P1,
+    #[default]
+    P2,
+    P3,
+}
+
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, AsRefStr, EnumString)]
 #[serde(rename_all = "lowercase")]
 #[strum(serialize_all = "snake_case")]
@@ -57,6 +71,8 @@ pub struct Task {
     id: String,
     goal_id: String,
     description: String,
+    #[serde(default)]
+    priority: Priority,
     #[serde(skip_serializing_if = "Option::is_none")]
     contract: Option<Contract>,
     state: TaskState,
@@ -81,6 +97,7 @@ impl Task {
         id: String,
         goal_id: String,
         description: String,
+        priority: Priority,
         contract: Option<Contract>,
         state: TaskState,
         blocked_by: Vec<String>,
@@ -91,6 +108,7 @@ impl Task {
             id,
             goal_id,
             description,
+            priority,
             contract,
             state,
             blocked_by,
@@ -120,6 +138,10 @@ impl Task {
 
     pub fn description(&self) -> &str {
         &self.description
+    }
+
+    pub fn priority(&self) -> Priority {
+        self.priority
     }
 
     pub fn contract(&self) -> Option<&Contract> {
@@ -160,6 +182,11 @@ impl Task {
 
     pub fn set_description(&mut self, description: String) {
         self.description = description;
+        self.updated_at = Timestamp::now();
+    }
+
+    pub fn set_priority(&mut self, priority: Priority) {
+        self.priority = priority;
         self.updated_at = Timestamp::now();
     }
 
@@ -258,9 +285,10 @@ impl Render for Task {
     fn render(&self, w: &mut dyn Write) -> Result<()> {
         writeln!(
             w,
-            "{} [{}]",
+            "{} [{}] [{}]",
             style(&self.id).cyan().bold(),
-            style(self.state.as_ref()).yellow()
+            style(self.state.as_ref()).yellow(),
+            self.priority.as_ref(),
         )?;
         writeln!(w, "  {}", &self.description)?;
 
@@ -307,6 +335,7 @@ mod tests {
             id: "t_abc123".to_string(),
             goal_id: "g_xyz789".to_string(),
             description: "test task".to_string(),
+            priority: Priority::default(),
             contract: None,
             state: TaskState::Pending,
             blocked_by: Vec::new(),

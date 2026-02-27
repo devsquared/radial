@@ -1,5 +1,7 @@
 use clap::{Parser, Subcommand};
 
+use crate::models::Priority;
+
 #[derive(Parser)]
 #[command(name = "radial")]
 #[command(about = "Task orchestration for LLM agents", long_about = None)]
@@ -82,6 +84,10 @@ pub enum Commands {
         /// The goal ID to check for ready tasks
         goal_id: String,
 
+        /// Filter by priority level (p0, p1, p2, p3)
+        #[arg(long)]
+        priority: Option<Priority>,
+
         /// Output as JSON
         #[arg(long)]
         json: bool,
@@ -121,6 +127,10 @@ pub enum TaskCommands {
         /// Task description
         description: String,
 
+        /// Priority level (p0, p1, p2, p3). Defaults to p2
+        #[arg(long)]
+        priority: Option<Priority>,
+
         /// What this task receives (contract)
         #[arg(long)]
         receives: Option<String>,
@@ -146,6 +156,10 @@ pub enum TaskCommands {
     List {
         /// The goal ID to list tasks for
         goal_id: String,
+
+        /// Filter by priority level (p0, p1, p2, p3)
+        #[arg(long)]
+        priority: Option<Priority>,
 
         /// Output as JSON
         #[arg(long)]
@@ -210,6 +224,12 @@ pub enum TaskCommands {
         task_id: String,
     },
 
+    /// Delete a pending task
+    Delete {
+        /// The task ID to delete
+        task_id: String,
+    },
+
     /// Add a comment to a task
     Comment {
         /// The task ID to comment on
@@ -240,6 +260,10 @@ pub enum EditCommands {
         /// New description
         #[arg(long)]
         description: Option<String>,
+
+        /// New priority level (p0, p1, p2, p3)
+        #[arg(long)]
+        priority: Option<Priority>,
 
         /// New receives (contract)
         #[arg(long)]
