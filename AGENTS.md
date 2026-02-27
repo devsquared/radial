@@ -16,12 +16,13 @@ to break goals into tracked, verifiable tasks. State is persisted as TOML files 
 - Reserve `thiserror` for library-style typed errors only if needed later
 
 ### Idiomatic Rust
-- Prefer iterators over manual loops
+- Use iterators over manual loops
 - Use `?` for early returns, not `.unwrap()` (except in tests)
 - Favor `impl Into<T>` and `AsRef<T>` for flexible APIs
 - Use `Default` trait where appropriate
 - Destructure structs and enums explicitly
 - Keep functions small and focused
+- Create getters and setters for struct fields
 
 ### Comments
 - Only comment *why*, not *what*
@@ -48,7 +49,7 @@ cargo nextest run
 Do not move on until both pass.
 
 ### Clippy
-Run frequently:
+Run clippy frequently. Must fix warnings before finishing:
 ```bash
 cargo clippy --all-targets -- -D warnings -W clippy::pedantic
 ```

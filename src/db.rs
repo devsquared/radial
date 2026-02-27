@@ -242,7 +242,7 @@ impl Database {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::models::{GoalState, Metrics, TaskMetrics};
+    use crate::models::{GoalState, Metrics, Priority, TaskMetrics};
     use jiff::Timestamp;
     use rstest::{fixture, rstest};
     use tempfile::TempDir;
@@ -267,6 +267,7 @@ mod tests {
             id.to_string(),
             goal_id.to_string(),
             "test task".to_string(),
+            Priority::default(),
             None,
             state,
             Vec::new(),
@@ -483,6 +484,7 @@ mod tests {
             "t1".to_string(),
             "g1".to_string(),
             "test task".to_string(),
+            Priority::default(),
             None,
             TaskState::Pending,
             Vec::new(),
@@ -493,6 +495,7 @@ mod tests {
             "t2".to_string(),
             "g1".to_string(),
             "test task".to_string(),
+            Priority::default(),
             None,
             TaskState::InProgress,
             Vec::new(),

@@ -4,7 +4,9 @@ use jiff::Timestamp;
 use crate::db::Database;
 use crate::helpers::find_similar_id;
 use crate::id::generate_id;
-use crate::models::{Comment, Contract, GoalState, Outcome, Task, TaskMetrics, TaskState};
+use crate::models::{
+    Comment, Contract, GoalState, Outcome, Priority, Task, TaskMetrics, TaskState,
+};
 
 /// Result of completing a task, including any unblocked tasks.
 #[derive(Debug)]
@@ -31,6 +33,7 @@ fn task_not_found_err(task_id: &str, db: &Database) -> anyhow::Error {
 pub fn create(
     goal_id: &str,
     description: String,
+    priority: Priority,
     receives: Option<String>,
     produces: Option<String>,
     verify: Option<String>,
@@ -98,6 +101,7 @@ pub fn create(
         generate_id(),
         goal_id_owned.clone(),
         description,
+        priority,
         contract,
         state,
         blocked_by_ids,
@@ -120,11 +124,18 @@ pub fn create(
     Ok(task)
 }
 
-pub fn list(goal_id: &str, db: &Database) -> Result<Vec<Task>> {
+pub fn list(goal_id: &str, priority: Option<&Priority>, db: &Database) -> Result<Vec<Task>> {
     db.get_goal(goal_id)
         .ok_or_else(|| anyhow!("Goal not found: {goal_id}"))?;
 
-    Ok(db.list_tasks(goal_id).into_iter().cloned().collect())
+    let mut tasks: Vec<Task> = db
+        .list_tasks(goal_id)
+        .into_iter()
+        .filter(|t| priority.is_none_or(|p| t.priority() == *p))
+        .cloned()
+        .collect();
+    tasks.sort_by_key(Task::priority);
+    Ok(tasks)
 }
 
 pub fn start(task_id: &str, db: &mut Database) -> Result<Task> {

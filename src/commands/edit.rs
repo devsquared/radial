@@ -1,7 +1,7 @@
 use anyhow::{Result, anyhow};
 
 use crate::db::Database;
-use crate::models::{Contract, Goal, Task};
+use crate::models::{Contract, Goal, Priority, Task};
 
 pub fn goal(goal_id: &str, description: String, db: &mut Database) -> Result<Goal> {
     let base = db.base_path().to_path_buf();
@@ -14,9 +14,11 @@ pub fn goal(goal_id: &str, description: String, db: &mut Database) -> Result<Goa
     Ok(goal.clone())
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn task(
     task_id: &str,
     description: Option<String>,
+    priority: Option<Priority>,
     receives: Option<String>,
     produces: Option<String>,
     verify: Option<String>,
@@ -30,6 +32,10 @@ pub fn task(
 
     if let Some(desc) = description {
         task.set_description(desc);
+    }
+
+    if let Some(prio) = priority {
+        task.set_priority(prio);
     }
 
     // Update contract fields, merging with existing values

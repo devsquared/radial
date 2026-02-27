@@ -11,10 +11,9 @@ pub mod models;
 pub mod output;
 
 use anyhow::{Context, Result, anyhow};
-use std::path::PathBuf;
-
 use cli::{Cli, Commands, EditCommands, GoalCommands, TaskCommands};
 use db::Database;
+use std::path::PathBuf;
 
 pub const RADIAL_DIR: &str = ".radial";
 pub const REDIRECT_FILE: &str = "redirect";
@@ -88,15 +87,18 @@ fn run_task(task_cmd: TaskCommands, db: &mut Database) -> Result<()> {
         TaskCommands::Create {
             goal_id,
             description,
+            priority,
             receives,
             produces,
             verify,
             blocked_by,
             json,
         } => {
+            let prio = priority.unwrap_or_default();
             let task = commands::task::create(
                 &goal_id,
                 description,
+                prio,
                 receives,
                 produces,
                 verify,
@@ -107,10 +109,11 @@ fn run_task(task_cmd: TaskCommands, db: &mut Database) -> Result<()> {
         }
         TaskCommands::List {
             goal_id,
+            priority,
             json,
             verbose,
         } => {
-            let tasks = commands::task::list(&goal_id, db)?;
+            let tasks = commands::task::list(&goal_id, priority.as_ref(), db)?;
             let goal = db
                 .get_goal(&goal_id)
                 .ok_or_else(|| anyhow!("Goal not found: {goal_id}"))?;
@@ -179,6 +182,7 @@ pub fn run(cli: Cli) -> Result<()> {
                 EditCommands::Task {
                     task_id,
                     description,
+                    priority,
                     receives,
                     produces,
                     verify,
@@ -187,6 +191,7 @@ pub fn run(cli: Cli) -> Result<()> {
                     let task = commands::edit::task(
                         &task_id,
                         description,
+                        priority,
                         receives,
                         produces,
                         verify,
@@ -211,9 +216,13 @@ pub fn run(cli: Cli) -> Result<()> {
             let mut db = ensure_initialized()?;
             commands::clean::run(all, force, &mut db)
         }
-        Commands::Ready { goal_id, json } => {
+        Commands::Ready {
+            goal_id,
+            priority,
+            json,
+        } => {
             let db = ensure_initialized()?;
-            let tasks = commands::ready::run(&goal_id, &db)?;
+            let tasks = commands::ready::run(&goal_id, priority.as_ref(), &db)?;
             let goal = db
                 .get_goal(&goal_id)
                 .ok_or_else(|| anyhow!("Goal not found: {goal_id}"))?;
