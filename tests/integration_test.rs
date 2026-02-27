@@ -227,7 +227,7 @@ fn test_task_state_transitions() {
     assert!(output.contains("pending"));
 
     // Start the task
-    env.run(&["task", "start", task_id])
+    env.run(&["task", "start", task_id, "--assignee", "test-agent"])
         .expect("Start task failed");
     let output = env
         .run(&["status", "--task", task_id])
@@ -288,7 +288,8 @@ fn test_task_with_artifacts() {
         .and_then(|line| line.split_whitespace().nth(2))
         .unwrap();
 
-    env.run(&["task", "start", task_id]).expect("Start failed");
+    env.run(&["task", "start", task_id, "--assignee", "test-agent"])
+        .expect("Start failed");
     env.run(&[
         "task",
         "complete",
@@ -410,7 +411,8 @@ fn test_goal_completion() {
         .and_then(|line| line.split_whitespace().nth(2))
         .unwrap();
 
-    env.run(&["task", "start", task_id]).expect("Start failed");
+    env.run(&["task", "start", task_id, "--assignee", "test-agent"])
+        .expect("Start failed");
     env.run(&["task", "complete", task_id, "--result", "All done"])
         .expect("Complete failed");
 
@@ -993,4 +995,263 @@ fn test_task_comments_json_output() {
     let parsed: Value = serde_json::from_str(&output).expect("Should be valid JSON");
     let comments = parsed["comments"].as_array().unwrap();
     assert_eq!(comments.len(), 2, "Show JSON should include comments");
+}
+
+#[test]
+fn test_task_assignee_and_release() {
+    let env = TestEnv::new();
+    env.run(&["init"]).expect("Init failed");
+
+    let output = env
+        .run(&["goal", "create", "Assignee test"])
+        .expect("Create goal failed");
+    let goal_id = output
+        .lines()
+        .find(|line| line.contains("Created goal:"))
+        .and_then(|line| line.split_whitespace().nth(2))
+        .unwrap();
+
+    let output = env
+        .run(&[
+            "task",
+            "create",
+            goal_id,
+            "Assignee task",
+            "--receives",
+            "Input",
+            "--produces",
+            "Output",
+            "--verify",
+            "Check",
+        ])
+        .expect("Create task failed");
+    let task_id = output
+        .lines()
+        .find(|line| line.contains("Created task:"))
+        .and_then(|line| line.split_whitespace().nth(2))
+        .unwrap();
+
+    // Start requires --assignee
+    let result = env.run(&["task", "start", task_id]);
+    assert!(result.is_err(), "Start without --assignee should fail");
+
+    // Start with assignee
+    let output = env
+        .run(&["task", "start", task_id, "--assignee", "agent-1"])
+        .expect("Start with assignee failed");
+    assert!(output.contains("Started task:"));
+    assert!(output.contains("Assigned to: agent-1"));
+
+    // Show should display assignee
+    let output = env.run(&["show", task_id]).expect("Show failed");
+    assert!(output.contains("agent-1"));
+
+    // Task list should show assignee
+    let output = env.run(&["task", "list", goal_id]).expect("List failed");
+    assert!(output.contains("agent-1"));
+
+    // JSON output should include assignee
+    let output = env
+        .run(&["show", task_id, "--json"])
+        .expect("Show --json failed");
+    let parsed: Value = serde_json::from_str(&output).expect("Should be valid JSON");
+    assert_eq!(parsed["assignee"], "agent-1");
+
+    // Release the task
+    let output = env
+        .run(&["task", "release", task_id])
+        .expect("Release failed");
+    assert!(output.contains("Released task:"));
+    assert!(output.contains("pending"));
+
+    // After release, assignee should be cleared
+    let output = env
+        .run(&["show", task_id, "--json"])
+        .expect("Show --json failed");
+    let parsed: Value = serde_json::from_str(&output).expect("Should be valid JSON");
+    assert!(
+        parsed["assignee"].is_null(),
+        "Assignee should be null after release"
+    );
+    assert_eq!(parsed["state"], "pending");
+}
+
+#[test]
+fn test_task_list_filter_by_assignee() {
+    let env = TestEnv::new();
+    env.run(&["init"]).expect("Init failed");
+
+    let output = env
+        .run(&["goal", "create", "Filter test"])
+        .expect("Create goal failed");
+    let goal_id = output
+        .lines()
+        .find(|line| line.contains("Created goal:"))
+        .and_then(|line| line.split_whitespace().nth(2))
+        .unwrap();
+
+    // Create two tasks
+    let output = env
+        .run(&[
+            "task",
+            "create",
+            goal_id,
+            "Task A",
+            "--receives",
+            "In",
+            "--produces",
+            "Out",
+            "--verify",
+            "Check",
+        ])
+        .expect("Create task A failed");
+    let task_a = output
+        .lines()
+        .find(|line| line.contains("Created task:"))
+        .and_then(|line| line.split_whitespace().nth(2))
+        .unwrap()
+        .to_string();
+
+    let output = env
+        .run(&[
+            "task",
+            "create",
+            goal_id,
+            "Task B",
+            "--receives",
+            "In",
+            "--produces",
+            "Out",
+            "--verify",
+            "Check",
+        ])
+        .expect("Create task B failed");
+    let task_b = output
+        .lines()
+        .find(|line| line.contains("Created task:"))
+        .and_then(|line| line.split_whitespace().nth(2))
+        .unwrap()
+        .to_string();
+
+    // Start tasks with different assignees
+    env.run(&["task", "start", &task_a, "--assignee", "agent-1"])
+        .expect("Start A failed");
+    env.run(&["task", "start", &task_b, "--assignee", "agent-2"])
+        .expect("Start B failed");
+
+    // Filter by agent-1
+    let output = env
+        .run(&["task", "list", goal_id, "--assignee", "agent-1"])
+        .expect("List filtered failed");
+    assert!(output.contains("Task A"));
+    assert!(!output.contains("Task B"));
+
+    // Filter by agent-2
+    let output = env
+        .run(&["task", "list", goal_id, "--assignee", "agent-2"])
+        .expect("List filtered failed");
+    assert!(!output.contains("Task A"));
+    assert!(output.contains("Task B"));
+
+    // No filter shows both
+    let output = env
+        .run(&["task", "list", goal_id])
+        .expect("List all failed");
+    assert!(output.contains("Task A"));
+    assert!(output.contains("Task B"));
+}
+
+#[test]
+fn test_task_release_from_failed() {
+    let env = TestEnv::new();
+    env.run(&["init"]).expect("Init failed");
+
+    let output = env
+        .run(&["goal", "create", "Release from failed test"])
+        .expect("Create goal failed");
+    let goal_id = output
+        .lines()
+        .find(|line| line.contains("Created goal:"))
+        .and_then(|line| line.split_whitespace().nth(2))
+        .unwrap();
+
+    let output = env
+        .run(&[
+            "task",
+            "create",
+            goal_id,
+            "Failing task",
+            "--receives",
+            "In",
+            "--produces",
+            "Out",
+            "--verify",
+            "Check",
+        ])
+        .expect("Create task failed");
+    let task_id = output
+        .lines()
+        .find(|line| line.contains("Created task:"))
+        .and_then(|line| line.split_whitespace().nth(2))
+        .unwrap();
+
+    // Start and fail the task
+    env.run(&["task", "start", task_id, "--assignee", "agent-1"])
+        .expect("Start failed");
+    env.run(&["task", "fail", task_id]).expect("Fail failed");
+
+    // Release from failed state
+    let output = env
+        .run(&["task", "release", task_id])
+        .expect("Release from failed should work");
+    assert!(output.contains("Released task:"));
+    assert!(output.contains("pending"));
+
+    // Verify state is back to pending with no assignee
+    let output = env
+        .run(&["show", task_id, "--json"])
+        .expect("Show --json failed");
+    let parsed: Value = serde_json::from_str(&output).expect("Should be valid JSON");
+    assert_eq!(parsed["state"], "pending");
+    assert!(parsed["assignee"].is_null());
+}
+
+#[test]
+fn test_release_unassigned_task_fails() {
+    let env = TestEnv::new();
+    env.run(&["init"]).expect("Init failed");
+
+    let output = env
+        .run(&["goal", "create", "Release unassigned test"])
+        .expect("Create goal failed");
+    let goal_id = output
+        .lines()
+        .find(|line| line.contains("Created goal:"))
+        .and_then(|line| line.split_whitespace().nth(2))
+        .unwrap();
+
+    let output = env
+        .run(&[
+            "task",
+            "create",
+            goal_id,
+            "Unassigned task",
+            "--receives",
+            "In",
+            "--produces",
+            "Out",
+            "--verify",
+            "Check",
+        ])
+        .expect("Create task failed");
+    let task_id = output
+        .lines()
+        .find(|line| line.contains("Created task:"))
+        .and_then(|line| line.split_whitespace().nth(2))
+        .unwrap();
+
+    // Releasing an unassigned task should fail
+    let result = env.run(&["task", "release", task_id]);
+    assert!(result.is_err(), "Release on unassigned task should fail");
+    assert!(result.unwrap_err().contains("no assignee"));
 }

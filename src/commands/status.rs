@@ -54,6 +54,7 @@ pub enum StatusResult {
 pub fn run(
     goal_id: Option<String>,
     task_id: Option<String>,
+    assignee: Option<String>,
     db: &Database,
 ) -> Result<StatusResult> {
     if let Some(tid) = task_id {
@@ -61,7 +62,7 @@ pub fn run(
     }
 
     if let Some(gid) = goal_id {
-        return get_goal(&gid, db).map(StatusResult::Goal);
+        return get_goal(&gid, assignee.as_deref(), db).map(StatusResult::Goal);
     }
 
     Ok(StatusResult::AllGoals(get_all_goals(db)))
@@ -73,13 +74,18 @@ fn get_task(task_id: &str, db: &Database) -> Result<Task> {
         .ok_or_else(|| anyhow!("Task not found: {task_id}"))
 }
 
-fn get_goal(goal_id: &str, db: &Database) -> Result<GoalStatus> {
+fn get_goal(goal_id: &str, assignee: Option<&str>, db: &Database) -> Result<GoalStatus> {
     let goal = db
         .get_goal(goal_id)
         .ok_or_else(|| anyhow!("Goal not found: {goal_id}"))?
         .clone();
 
-    let tasks: Vec<Task> = db.list_tasks(goal_id).into_iter().cloned().collect();
+    let tasks: Vec<Task> = db
+        .list_tasks(goal_id)
+        .into_iter()
+        .filter(|t| assignee.is_none_or(|a| t.assignee() == Some(a)))
+        .cloned()
+        .collect();
     let metrics = db.compute_goal_metrics(goal_id);
 
     Ok(GoalStatus {

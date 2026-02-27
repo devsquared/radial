@@ -152,19 +152,21 @@ pub fn task_list(tasks: &[Task], goal: &Goal, verbose: bool, json: bool) -> Resu
 
         writeln!(
             w,
-            "{:<10} {:<13} {:<10} {}",
+            "{:<10} {:<13} {:<10} {:<12} {}",
             style("ID").bold().underlined(),
             style("STATE").bold().underlined(),
             style("PRIORITY").bold().underlined(),
+            style("ASSIGNEE").bold().underlined(),
             style("DESCRIPTION").bold().underlined(),
         )?;
         for task in tasks {
             writeln!(
                 w,
-                "{:<10} {:<13} {:<10} {}",
+                "{:<10} {:<13} {:<10} {:<12} {}",
                 style(task.id()).cyan(),
                 state_styled(task.state().as_ref()),
                 task.priority().as_ref(),
+                task.assignee().unwrap_or("-"),
                 truncate(task.description(), 80),
             )?;
             if verbose && !task.comments().is_empty() {
@@ -191,6 +193,22 @@ pub fn task_started(task: &Task) -> Result<()> {
         style(task.id()).cyan().bold()
     )?;
     writeln!(w, "  {}", truncate(task.description(), 80))?;
+    if let Some(assignee) = task.assignee() {
+        writeln!(w, "  Assigned to: {assignee}")?;
+    }
+    Ok(())
+}
+
+pub fn task_released(task: &Task) -> Result<()> {
+    let mut w = io::stdout().lock();
+    writeln!(
+        w,
+        "{} {}",
+        style("Released task:").yellow(),
+        style(task.id()).cyan().bold()
+    )?;
+    writeln!(w, "  {}", truncate(task.description(), 80))?;
+    writeln!(w, "  State: {}", state_styled(task.state().as_ref()))?;
     Ok(())
 }
 
@@ -283,10 +301,11 @@ fn status_task(task: &Task, json: bool) -> Result<()> {
     json_or(task, json, |w| {
         writeln!(
             w,
-            "{:<10} {:<13} {:<10} {}",
+            "{:<10} {:<13} {:<10} {:<12} {}",
             style(task.id()).cyan(),
             state_styled(task.state().as_ref()),
             task.priority().as_ref(),
+            task.assignee().unwrap_or("-"),
             truncate(task.description(), 80),
         )?;
         Ok(())
@@ -312,19 +331,21 @@ fn status_goal(goal_status: &crate::commands::status::GoalStatus, json: bool) ->
         if !goal_status.tasks().is_empty() {
             writeln!(
                 w,
-                "{:<10} {:<13} {:<10} {}",
+                "{:<10} {:<13} {:<10} {:<12} {}",
                 style("ID").bold().underlined(),
                 style("STATE").bold().underlined(),
                 style("PRIORITY").bold().underlined(),
+                style("ASSIGNEE").bold().underlined(),
                 style("DESCRIPTION").bold().underlined(),
             )?;
             for task in goal_status.tasks() {
                 writeln!(
                     w,
-                    "{:<10} {:<13} {:<10} {}",
+                    "{:<10} {:<13} {:<10} {:<12} {}",
                     style(task.id()).cyan(),
                     state_styled(task.state().as_ref()),
                     task.priority().as_ref(),
+                    task.assignee().unwrap_or("-"),
                     truncate(task.description(), 80),
                 )?;
             }
@@ -395,6 +416,9 @@ fn show_task(task: &Task, json: bool) -> Result<()> {
         writeln!(w)?;
         field(w, "Priority", task.priority().as_ref())?;
         field(w, "Goal", task.goal_id())?;
+        if let Some(assignee) = task.assignee() {
+            field(w, "Assignee", assignee)?;
+        }
         field(w, "Created", &task.created_at().to_string())?;
         field(w, "Updated", &task.updated_at().to_string())?;
 
@@ -515,19 +539,21 @@ fn show_goal(
             writeln!(w)?;
             writeln!(
                 w,
-                "{:<10} {:<13} {:<10} {}",
+                "{:<10} {:<13} {:<10} {:<12} {}",
                 style("ID").bold().underlined(),
                 style("STATE").bold().underlined(),
                 style("PRIORITY").bold().underlined(),
+                style("ASSIGNEE").bold().underlined(),
                 style("DESCRIPTION").bold().underlined(),
             )?;
             for task in tasks {
                 writeln!(
                     w,
-                    "{:<10} {:<13} {:<10} {}",
+                    "{:<10} {:<13} {:<10} {:<12} {}",
                     style(task.id()).cyan(),
                     state_styled(task.state().as_ref()),
                     task.priority().as_ref(),
+                    task.assignee().unwrap_or("-"),
                     truncate(task.description(), 80),
                 )?;
             }
@@ -619,10 +645,11 @@ pub fn list(results: &[GoalWithTasks], json: bool) -> Result<()> {
                 for task in &r.tasks {
                     writeln!(
                         w,
-                        "  {:<10} {:<13} {:<10} {}",
+                        "  {:<10} {:<13} {:<10} {:<12} {}",
                         style(task.id()).cyan(),
                         state_styled(task.state().as_ref()),
                         task.priority().as_ref(),
+                        task.assignee().unwrap_or("-"),
                         truncate(task.description(), 60),
                     )?;
                 }

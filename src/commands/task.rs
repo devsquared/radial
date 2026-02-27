@@ -124,7 +124,12 @@ pub fn create(
     Ok(task)
 }
 
-pub fn list(goal_id: &str, priority: Option<&Priority>, db: &Database) -> Result<Vec<Task>> {
+pub fn list(
+    goal_id: &str,
+    priority: Option<&Priority>,
+    assignee: Option<&str>,
+    db: &Database,
+) -> Result<Vec<Task>> {
     db.get_goal(goal_id)
         .ok_or_else(|| anyhow!("Goal not found: {goal_id}"))?;
 
@@ -132,13 +137,14 @@ pub fn list(goal_id: &str, priority: Option<&Priority>, db: &Database) -> Result
         .list_tasks(goal_id)
         .into_iter()
         .filter(|t| priority.is_none_or(|p| t.priority() == *p))
+        .filter(|t| assignee.is_none_or(|a| t.assignee() == Some(a)))
         .cloned()
         .collect();
     tasks.sort_by_key(Task::priority);
     Ok(tasks)
 }
 
-pub fn start(task_id: &str, db: &mut Database) -> Result<Task> {
+pub fn start(task_id: &str, assignee: &str, db: &mut Database) -> Result<Task> {
     let task = db.get_task(task_id);
 
     if task.is_none() {
@@ -175,6 +181,7 @@ pub fn start(task_id: &str, db: &mut Database) -> Result<Task> {
             "Failed to start task: another process may have already started it"
         ));
     }
+    task.set_assignee(Some(assignee.to_owned()));
     task.write_file(&base)?;
 
     Ok(task.clone())
@@ -321,6 +328,24 @@ pub fn retry(task_id: &str, db: &mut Database) -> Result<Task> {
     let task = db.get_task_mut(task_id).unwrap();
     if !task.retry() {
         return Err(anyhow!("Failed to retry task: state may have changed"));
+    }
+    task.write_file(&base)?;
+
+    Ok(task.clone())
+}
+
+pub fn release(task_id: &str, db: &mut Database) -> Result<Task> {
+    if db.get_task(task_id).is_none() {
+        return Err(task_not_found_err(task_id, db));
+    }
+
+    let base = db.base_path().to_owned();
+    let task = db.get_task_mut(task_id).unwrap();
+    if !task.release() {
+        return Err(anyhow!(
+            "Task has no assignee to release. Current state: {}",
+            task.state().as_ref()
+        ));
     }
     task.write_file(&base)?;
 
