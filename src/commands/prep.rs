@@ -1,3 +1,5 @@
+use std::fmt::Write;
+
 use crate::db::Database;
 
 use super::compact;
@@ -9,12 +11,13 @@ pub fn run(db: &Database) -> String {
 
     let count = compact::count_candidates(db);
     if count > 0 {
-        text.push_str(&format!(
+        let _ = write!(
+            text,
             "\n### Compaction\nThere {} {} task(s) eligible for compaction. \
              Run `rd compact analyze` to review them.\n",
             if count == 1 { "is" } else { "are" },
             count,
-        ));
+        );
     }
 
     text
