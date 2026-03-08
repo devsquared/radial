@@ -39,36 +39,30 @@ to break goals into tracked, verifiable tasks. State is persisted as TOML files 
 
 ## Workflow
 
-### Build and Test
-After making changes:
-```bash
-cargo build
-cargo nextest run
-```
+### CI Gate (required before every commit)
 
-Do not move on until both pass.
+All three checks below must pass before any commit. Run them in this order:
 
-### Clippy
-Run clippy frequently. Must fix warnings before finishing:
 ```bash
+cargo fmt --all
 cargo clippy --all-targets -- -D warnings -W clippy::pedantic
+cargo nextest run --all-targets
 ```
 
-Fix warnings as they come up, not later. Common allows if too noisy:
-```rust
-#![allow(clippy::module_name_repetitions)]
-```
+If any check fails, fix the issue and re-run from that step. Do not commit until
+all three pass. These are the same checks that run in CI — a commit that fails
+locally will fail the pipeline.
 
-### Formatting
-Always format before committing:
-```bash
-cargo fmt
-```
+### Notes on Each Check
 
-### CLI Changes
-When adding or changing a CLI command, check whether `rd prep` output needs to be
-updated. The prep command generates a guide for LLM agents, so it must stay in sync
-with the available commands.
+- **Formatting** (`cargo fmt`): Run first so clippy and tests see formatted code.
+- **Clippy** (`cargo clippy ... -W clippy::pedantic`): Fix warnings as they come up,
+  not later. Common allows if too noisy:
+  ```rust
+  #![allow(clippy::module_name_repetitions)]
+  ```
+- **Tests** (`cargo nextest run`): Includes unit and integration tests. Do not move on
+  until all pass.
 
 ## Dependencies
 
@@ -97,6 +91,7 @@ radial/
 │   ├── lib.rs            # Core logic, radial dir resolution, command dispatch
 │   ├── cli.rs            # Clap CLI definitions
 │   ├── db.rs             # TOML persistence layer
+│   ├── duration.rs       # Human-readable duration parsing
 │   ├── id.rs             # ID generation
 │   ├── helpers.rs         # Fuzzy ID matching
 │   ├── output.rs         # Terminal and JSON rendering

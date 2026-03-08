@@ -80,6 +80,8 @@ pub struct Task {
     blocked_by: Vec<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     assignee: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    started_at: Option<Timestamp>,
     #[serde(skip_serializing_if = "Option::is_none")]
     result: Option<Outcome>,
     created_at: Timestamp,
@@ -113,6 +115,7 @@ impl Task {
             state,
             blocked_by,
             assignee: None,
+            started_at: None,
             result: None,
             created_at,
             updated_at,
@@ -204,6 +207,10 @@ impl Task {
         self.assignee.as_deref()
     }
 
+    pub fn started_at(&self) -> Option<Timestamp> {
+        self.started_at
+    }
+
     pub fn set_assignee(&mut self, assignee: Option<String>) {
         self.assignee = assignee;
         self.updated_at = Timestamp::now();
@@ -214,6 +221,7 @@ impl Task {
             return false;
         }
         self.assignee = None;
+        self.started_at = None;
         self.state = TaskState::Pending;
         self.updated_at = Timestamp::now();
         true
@@ -234,7 +242,11 @@ impl Task {
             return false;
         }
         self.state = to;
-        self.updated_at = Timestamp::now();
+        let now = Timestamp::now();
+        self.updated_at = now;
+        if to == TaskState::InProgress {
+            self.started_at = Some(now);
+        }
         true
     }
 
@@ -266,7 +278,9 @@ impl Task {
         }
         self.state = TaskState::InProgress;
         self.metrics.retry_count += 1;
-        self.updated_at = Timestamp::now();
+        let now = Timestamp::now();
+        self.updated_at = now;
+        self.started_at = Some(now);
         true
     }
 
@@ -340,6 +354,7 @@ mod tests {
             state: TaskState::Pending,
             blocked_by: Vec::new(),
             assignee: None,
+            started_at: None,
             result: None,
             created_at: now,
             updated_at: now,
@@ -619,5 +634,53 @@ mod tests {
         task.assignee = Some("agent-1".to_string());
         let output = render_to_string(&task);
         assert!(output.contains("Assignee: agent-1"));
+    }
+
+    // -- started_at --
+
+    // Transitioning to InProgress should set started_at.
+    #[rstest]
+    fn transition_to_in_progress_sets_started_at(mut task: Task) {
+        assert!(task.started_at.is_none());
+        task.transition(TaskState::Pending, TaskState::InProgress);
+        assert!(task.started_at.is_some());
+    }
+
+    // Transitioning to a non-InProgress state should not set started_at.
+    #[rstest]
+    fn transition_to_other_state_does_not_set_started_at(mut task: Task) {
+        task.state = TaskState::InProgress;
+        task.transition(TaskState::InProgress, TaskState::Completed);
+        assert!(task.started_at.is_none());
+    }
+
+    // Retrying a failed task should set started_at.
+    #[rstest]
+    fn retry_sets_started_at(mut task: Task) {
+        task.state = TaskState::Failed;
+        assert!(task.started_at.is_none());
+        task.retry();
+        assert!(task.started_at.is_some());
+    }
+
+    // Releasing a task should clear started_at.
+    #[rstest]
+    fn release_clears_started_at(mut task: Task) {
+        task.state = TaskState::InProgress;
+        task.assignee = Some("agent-1".to_string());
+        task.started_at = Some(Timestamp::now());
+        task.release();
+        assert!(task.started_at.is_none());
+    }
+
+    // Completing a task should preserve started_at.
+    #[rstest]
+    fn complete_preserves_started_at(mut task: Task) {
+        task.state = TaskState::InProgress;
+        let ts = Timestamp::now();
+        task.started_at = Some(ts);
+        let outcome = Outcome::new("done".to_string(), Vec::new());
+        task.complete(outcome, TaskMetrics::default());
+        assert_eq!(task.started_at, Some(ts));
     }
 }

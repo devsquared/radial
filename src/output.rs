@@ -212,6 +212,39 @@ pub fn task_released(task: &Task) -> Result<()> {
     Ok(())
 }
 
+pub fn tasks_released_stale(tasks: &[Task]) -> Result<()> {
+    let mut w = io::stdout().lock();
+    if tasks.is_empty() {
+        writeln!(w, "No stale in-progress tasks found.")?;
+        return Ok(());
+    }
+    writeln!(w, "Released {} stale task(s):", style(tasks.len()).bold())?;
+    for task in tasks {
+        let assignee = task.assignee().unwrap_or("(none)");
+        writeln!(
+            w,
+            "  {} (assigned to {})",
+            style(task.id()).cyan(),
+            assignee,
+        )?;
+    }
+    Ok(())
+}
+
+pub fn tasks_released_all_in_progress(tasks: &[Task]) -> Result<()> {
+    let mut w = io::stdout().lock();
+    if tasks.is_empty() {
+        writeln!(w, "No in-progress tasks found.")?;
+        return Ok(());
+    }
+    writeln!(
+        w,
+        "Released {} task(s) from in-progress back to pending.",
+        style(tasks.len()).bold()
+    )?;
+    Ok(())
+}
+
 pub fn task_completed(result: &CompleteResult) -> Result<()> {
     let mut w = io::stdout().lock();
     writeln!(

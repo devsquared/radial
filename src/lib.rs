@@ -5,6 +5,7 @@
 pub mod cli;
 pub mod commands;
 pub mod db;
+pub mod duration;
 pub mod helpers;
 pub mod id;
 pub mod models;
@@ -143,9 +144,26 @@ fn run_task(task_cmd: TaskCommands, db: &mut Database) -> Result<()> {
             let task = commands::task::retry(&task_id, db)?;
             output::task_retry(&task)
         }
-        TaskCommands::Release { task_id } => {
-            let task = commands::task::release(&task_id, db)?;
-            output::task_released(&task)
+        TaskCommands::Release {
+            task_id,
+            stale,
+            all_in_progress,
+        } => {
+            if let Some(task_id) = task_id {
+                let task = commands::task::release(&task_id, db)?;
+                output::task_released(&task)
+            } else if let Some(duration_str) = stale {
+                let threshold = crate::duration::parse_duration(&duration_str)?;
+                let tasks = commands::task::release_stale(threshold, db)?;
+                output::tasks_released_stale(&tasks)
+            } else if all_in_progress {
+                let tasks = commands::task::release_all_in_progress(db)?;
+                output::tasks_released_all_in_progress(&tasks)
+            } else {
+                Err(anyhow!(
+                    "Provide a task ID, --stale <duration>, or --all-in-progress"
+                ))
+            }
         }
         TaskCommands::Delete { task_id } => {
             let task = commands::task::delete(&task_id, db)?;
@@ -239,8 +257,9 @@ pub fn run(cli: Cli) -> Result<()> {
             output::ready_tasks(&tasks, goal, json)
         }
         Commands::Prep => {
-            let text = commands::prep::run();
-            output::prep(text)
+            let db = ensure_initialized()?;
+            let text = commands::prep::run(&db);
+            output::prep(&text)
         }
     }
 }
