@@ -1259,7 +1259,7 @@ fn test_release_unassigned_task_fails() {
 // -- Compaction tests --
 
 /// Helper: create a goal, create a task with contract, start it, and complete it.
-/// Returns (goal_id, task_id).
+/// Returns (`goal_id`, `task_id`).
 fn create_completed_task(env: &TestEnv, label: &str) -> (String, String) {
     let output = env
         .run(&["goal", "create", &format!("{label} goal")])
