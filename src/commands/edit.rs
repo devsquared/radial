@@ -1,7 +1,7 @@
 use anyhow::{Result, anyhow};
 
 use crate::db::Database;
-use crate::helpers::find_similar_id;
+use crate::helpers::{detect_cycle, find_similar_id};
 use crate::id::{GoalId, TaskId};
 use crate::models::{Contract, Goal, Priority, Task};
 
@@ -55,6 +55,15 @@ pub fn task(
                     ))
                 };
             }
+        }
+
+        // Check for cycles
+        if let Some(cycle_path) = detect_cycle(task_id, dep_ids, &all_tasks) {
+            let path_str: Vec<String> = cycle_path.iter().map(|id| id.to_string()).collect();
+            return Err(anyhow!(
+                "Circular dependency detected: {}",
+                path_str.join(" -> ")
+            ));
         }
     }
 
