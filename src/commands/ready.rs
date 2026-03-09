@@ -1,9 +1,10 @@
 use anyhow::{Result, anyhow};
 
 use crate::db::Database;
+use crate::id::GoalId;
 use crate::models::{Priority, Task, TaskState};
 
-pub fn run(goal_id: &str, priority: Option<&Priority>, db: &Database) -> Result<Vec<Task>> {
+pub fn run(goal_id: &GoalId, priority: Option<&Priority>, db: &Database) -> Result<Vec<Task>> {
     db.get_goal(goal_id)
         .ok_or_else(|| anyhow!("Goal not found: {goal_id}"))?;
 

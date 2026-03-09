@@ -6,6 +6,7 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result, bail};
 use fs2::FileExt;
 
+use crate::id::{GoalId, TaskId};
 use crate::models::{Goal, Metrics, Task, TaskState};
 
 /// Atomically write content to a file using a temporary file + rename.
@@ -25,8 +26,8 @@ pub fn atomic_write(path: &Path, content: &[u8]) -> Result<()> {
 
 pub struct Database {
     path: PathBuf,
-    goals: HashMap<String, Goal>,
-    tasks: HashMap<String, Task>,
+    goals: HashMap<GoalId, Goal>,
+    tasks: HashMap<TaskId, Task>,
 }
 
 impl Database {
@@ -80,7 +81,7 @@ impl Database {
             let goal: Goal = toml::from_str(&goal_content)
                 .with_context(|| format!("Failed to parse {}", goal_toml_path.display()))?;
 
-            let goal_id = goal.id().to_owned();
+            let goal_id = goal.id().clone();
             self.goals.insert(goal_id, goal);
 
             let task_dir = fs::read_dir(&path)
@@ -103,7 +104,7 @@ impl Database {
                 let task: Task = toml::from_str(&task_content)
                     .with_context(|| format!("Failed to parse {}", task_path.display()))?;
 
-                self.tasks.insert(task.id().to_owned(), task);
+                self.tasks.insert(task.id().clone(), task);
             }
         }
 
@@ -117,20 +118,20 @@ impl Database {
             bail!("Goal already exists: {}", goal.id());
         }
 
-        let goal_dir = self.path.join(goal.id());
+        let goal_dir = self.path.join(goal.id().as_ref());
         fs::create_dir_all(&goal_dir).context("Failed to create goal directory")?;
 
         goal.write_file(&self.path)?;
-        self.goals.insert(goal.id().to_owned(), goal);
+        self.goals.insert(goal.id().clone(), goal);
 
         Ok(())
     }
 
-    pub fn get_goal(&self, id: &str) -> Option<&Goal> {
+    pub fn get_goal(&self, id: &GoalId) -> Option<&Goal> {
         self.goals.get(id)
     }
 
-    pub fn get_goal_mut(&mut self, id: &str) -> Option<&mut Goal> {
+    pub fn get_goal_mut(&mut self, id: &GoalId) -> Option<&mut Goal> {
         self.goals.get_mut(id)
     }
 
@@ -141,7 +142,7 @@ impl Database {
     }
 
     /// Delete a goal and all its tasks from disk and memory.
-    pub fn delete_goal(&mut self, goal_id: &str) -> Result<()> {
+    pub fn delete_goal(&mut self, goal_id: &GoalId) -> Result<()> {
         // Remove tasks from memory
         self.tasks.retain(|_, t| t.goal_id() != goal_id);
 
@@ -149,7 +150,7 @@ impl Database {
         self.goals.remove(goal_id);
 
         // Remove the goal directory from disk
-        let goal_dir = self.path.join(goal_id);
+        let goal_dir = self.path.join(goal_id.as_ref());
         if goal_dir.exists() {
             fs::remove_dir_all(&goal_dir).with_context(|| {
                 format!("Failed to remove goal directory: {}", goal_dir.display())
@@ -167,22 +168,25 @@ impl Database {
         }
 
         task.write_file(&self.path)?;
-        self.tasks.insert(task.id().to_owned(), task);
+        self.tasks.insert(task.id().clone(), task);
 
         Ok(())
     }
 
-    pub fn get_task(&self, id: &str) -> Option<&Task> {
+    pub fn get_task(&self, id: &TaskId) -> Option<&Task> {
         self.tasks.get(id)
     }
 
     /// Delete a task from memory and disk.
     /// Removes from memory if present, and always attempts to clean up the
     /// file on disk in case memory and disk are out of sync.
-    pub fn delete_task(&mut self, task_id: &str, goal_id: &str) -> Result<()> {
+    pub fn delete_task(&mut self, task_id: &TaskId, goal_id: &GoalId) -> Result<()> {
         self.tasks.remove(task_id);
 
-        let path = self.path.join(goal_id).join(format!("{task_id}.toml"));
+        let path = self
+            .path
+            .join(goal_id.as_ref())
+            .join(format!("{task_id}.toml"));
         if path.exists() {
             fs::remove_file(&path)
                 .with_context(|| format!("Failed to remove task file: {}", path.display()))?;
@@ -191,11 +195,11 @@ impl Database {
         Ok(())
     }
 
-    pub fn get_task_mut(&mut self, id: &str) -> Option<&mut Task> {
+    pub fn get_task_mut(&mut self, id: &TaskId) -> Option<&mut Task> {
         self.tasks.get_mut(id)
     }
 
-    pub fn list_tasks(&self, goal_id: &str) -> Vec<&Task> {
+    pub fn list_tasks(&self, goal_id: &GoalId) -> Vec<&Task> {
         let mut tasks: Vec<&Task> = self
             .tasks
             .values()
@@ -206,7 +210,7 @@ impl Database {
     }
 
     #[allow(clippy::missing_panics_doc)]
-    pub fn compute_goal_metrics(&self, goal_id: &str) -> Metrics {
+    pub fn compute_goal_metrics(&self, goal_id: &GoalId) -> Metrics {
         let tasks = self.list_tasks(goal_id);
 
         let total_tokens: i64 = tasks.iter().map(|t| t.metrics().tokens()).sum();
@@ -242,15 +246,24 @@ impl Database {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::id::{GoalId, TaskId};
     use crate::models::{GoalState, Metrics, Priority, TaskMetrics};
     use jiff::Timestamp;
     use rstest::{fixture, rstest};
     use tempfile::TempDir;
 
+    fn goal_id(s: &str) -> GoalId {
+        GoalId::from(s.to_string())
+    }
+
+    fn task_id(s: &str) -> TaskId {
+        TaskId::from(s.to_string())
+    }
+
     fn make_goal(id: &str) -> Goal {
         let now = Timestamp::now();
         Goal::new(
-            id.to_string(),
+            goal_id(id),
             None,
             "test goal".to_string(),
             GoalState::Pending,
@@ -261,11 +274,11 @@ mod tests {
         )
     }
 
-    fn make_task(id: &str, goal_id: &str, state: TaskState) -> Task {
+    fn make_task(id: &str, gid: &str, state: TaskState) -> Task {
         let now = Timestamp::now();
         Task::new(
-            id.to_string(),
-            goal_id.to_string(),
+            task_id(id),
+            goal_id(gid),
             "test task".to_string(),
             Priority::default(),
             None,
@@ -351,7 +364,7 @@ mod tests {
         assert!(goal_path.exists());
 
         let loaded: Goal = toml::from_str(&std::fs::read_to_string(goal_path).unwrap()).unwrap();
-        assert_eq!(loaded.id(), "g1");
+        assert_eq!(loaded.id(), &goal_id("g1"));
     }
 
     // Inserting a goal with an ID that already exists should fail rather
@@ -370,9 +383,9 @@ mod tests {
     #[rstest]
     fn get_goal_returns_reference(db_with_goal_and_task: (TempDir, Database)) {
         let (_dir, db) = db_with_goal_and_task;
-        assert!(db.get_goal("g1").is_some());
-        assert_eq!(db.get_goal("g1").unwrap().id(), "g1");
-        assert!(db.get_goal("nonexistent").is_none());
+        assert!(db.get_goal(&goal_id("g1")).is_some());
+        assert_eq!(db.get_goal(&goal_id("g1")).unwrap().id(), &goal_id("g1"));
+        assert!(db.get_goal(&goal_id("nonexistent")).is_none());
     }
 
     // get_goal_mut hands back a mutable reference so callers can modify
@@ -380,8 +393,11 @@ mod tests {
     #[rstest]
     fn get_goal_mut_allows_mutation(db_with_goal_and_task: (TempDir, Database)) {
         let (_dir, mut db) = db_with_goal_and_task;
-        db.get_goal_mut("g1").unwrap().mark_in_progress();
-        assert_eq!(db.get_goal("g1").unwrap().state(), GoalState::InProgress);
+        db.get_goal_mut(&goal_id("g1")).unwrap().mark_in_progress();
+        assert_eq!(
+            db.get_goal(&goal_id("g1")).unwrap().state(),
+            GoalState::InProgress
+        );
     }
 
     // -- list_goals --
@@ -393,7 +409,7 @@ mod tests {
         let ts1 = Timestamp::from_millisecond(1_000_000).unwrap();
         let ts2 = Timestamp::from_millisecond(2_000_000).unwrap();
         let g1 = Goal::new(
-            "g1".to_string(),
+            goal_id("g1"),
             None,
             "test goal".to_string(),
             GoalState::Pending,
@@ -403,7 +419,7 @@ mod tests {
             Metrics::default(),
         );
         let g2 = Goal::new(
-            "g2".to_string(),
+            goal_id("g2"),
             None,
             "test goal".to_string(),
             GoalState::Pending,
@@ -418,8 +434,8 @@ mod tests {
 
         let goals = db.list_goals();
         assert_eq!(goals.len(), 2);
-        assert_eq!(goals[0].id(), "g2");
-        assert_eq!(goals[1].id(), "g1");
+        assert_eq!(goals[0].id(), &goal_id("g2"));
+        assert_eq!(goals[1].id(), &goal_id("g1"));
     }
 
     // -- create_task --
@@ -433,8 +449,8 @@ mod tests {
         assert!(task_path.exists());
 
         let loaded: Task = toml::from_str(&std::fs::read_to_string(task_path).unwrap()).unwrap();
-        assert_eq!(loaded.id(), "t1");
-        assert_eq!(loaded.goal_id(), "g1");
+        assert_eq!(loaded.id(), &task_id("t1"));
+        assert_eq!(loaded.goal_id(), &goal_id("g1"));
     }
 
     // Duplicate task IDs within the same database should be rejected.
@@ -453,18 +469,21 @@ mod tests {
     #[rstest]
     fn get_task_returns_reference(db_with_goal_and_task: (TempDir, Database)) {
         let (_dir, db) = db_with_goal_and_task;
-        assert!(db.get_task("t1").is_some());
-        assert!(db.get_task("nonexistent").is_none());
+        assert!(db.get_task(&task_id("t1")).is_some());
+        assert!(db.get_task(&task_id("nonexistent")).is_none());
     }
 
     // Mutations through get_task_mut should be visible through get_task.
     #[rstest]
     fn get_task_mut_allows_mutation(db_with_goal_and_task: (TempDir, Database)) {
         let (_dir, mut db) = db_with_goal_and_task;
-        db.get_task_mut("t1")
+        db.get_task_mut(&task_id("t1"))
             .unwrap()
             .transition(TaskState::Pending, TaskState::InProgress);
-        assert_eq!(db.get_task("t1").unwrap().state(), TaskState::InProgress);
+        assert_eq!(
+            db.get_task(&task_id("t1")).unwrap().state(),
+            TaskState::InProgress
+        );
     }
 
     // -- list_tasks --
@@ -481,8 +500,8 @@ mod tests {
         let ts1 = Timestamp::from_millisecond(2_000_000).unwrap();
         let ts2 = Timestamp::from_millisecond(1_000_000).unwrap();
         let t1 = Task::new(
-            "t1".to_string(),
-            "g1".to_string(),
+            task_id("t1"),
+            goal_id("g1"),
             "test task".to_string(),
             Priority::default(),
             None,
@@ -492,8 +511,8 @@ mod tests {
             ts1,
         );
         let t2 = Task::new(
-            "t2".to_string(),
-            "g1".to_string(),
+            task_id("t2"),
+            goal_id("g1"),
             "test task".to_string(),
             Priority::default(),
             None,
@@ -508,13 +527,13 @@ mod tests {
         db.create_task(make_task("t3", "g2", TaskState::Pending))
             .unwrap();
 
-        let g1_tasks = db.list_tasks("g1");
+        let g1_tasks = db.list_tasks(&goal_id("g1"));
         assert_eq!(g1_tasks.len(), 2);
-        assert_eq!(g1_tasks[0].id(), "t2");
-        assert_eq!(g1_tasks[1].id(), "t1");
+        assert_eq!(g1_tasks[0].id(), &task_id("t2"));
+        assert_eq!(g1_tasks[1].id(), &task_id("t1"));
 
-        assert_eq!(db.list_tasks("g2").len(), 1);
-        assert!(db.list_tasks("nonexistent").is_empty());
+        assert_eq!(db.list_tasks(&goal_id("g2")).len(), 1);
+        assert!(db.list_tasks(&goal_id("nonexistent")).is_empty());
     }
 
     // -- compute_goal_metrics --
@@ -537,7 +556,7 @@ mod tests {
         db.create_task(make_task("t3", "g1", TaskState::Pending))
             .unwrap();
 
-        let metrics = db.compute_goal_metrics("g1");
+        let metrics = db.compute_goal_metrics(&goal_id("g1"));
         assert_eq!(metrics.task_count(), 3);
         assert_eq!(metrics.tasks_completed(), 1);
         assert_eq!(metrics.tasks_failed(), 1);
@@ -549,7 +568,7 @@ mod tests {
     #[rstest]
     fn compute_goal_metrics_empty(db: (TempDir, Database)) {
         let (_dir, db) = db;
-        let metrics = db.compute_goal_metrics("nonexistent");
+        let metrics = db.compute_goal_metrics(&goal_id("nonexistent"));
         assert_eq!(metrics.task_count(), 0);
         assert_eq!(metrics.total_tokens(), 0);
     }
@@ -564,9 +583,9 @@ mod tests {
         let task_path = dir.path().join("g1").join("t1.toml");
         assert!(task_path.exists());
 
-        db.delete_task("t1", "g1").unwrap();
+        db.delete_task(&task_id("t1"), &goal_id("g1")).unwrap();
 
-        assert!(db.get_task("t1").is_none());
+        assert!(db.get_task(&task_id("t1")).is_none());
         assert!(!task_path.exists());
     }
 
@@ -579,10 +598,10 @@ mod tests {
         assert!(task_path.exists());
 
         // Simulate out-of-sync: remove from memory but leave file
-        db.tasks.remove("t1");
+        db.tasks.remove(&task_id("t1"));
         assert!(task_path.exists());
 
-        db.delete_task("t1", "g1").unwrap();
+        db.delete_task(&task_id("t1"), &goal_id("g1")).unwrap();
         assert!(!task_path.exists());
     }
 
@@ -591,7 +610,7 @@ mod tests {
     #[rstest]
     fn delete_task_nonexistent_succeeds(db: (TempDir, Database)) {
         let (_dir, mut db) = db;
-        assert!(db.delete_task("nope", "g1").is_ok());
+        assert!(db.delete_task(&task_id("nope"), &goal_id("g1")).is_ok());
     }
 
     // -- open / reload --
@@ -603,9 +622,9 @@ mod tests {
         let (dir, _) = db_with_goal_and_task;
 
         let reloaded = Database::open(dir.path()).unwrap();
-        assert!(reloaded.get_goal("g1").is_some());
-        assert!(reloaded.get_task("t1").is_some());
-        assert_eq!(reloaded.list_tasks("g1").len(), 1);
+        assert!(reloaded.get_goal(&goal_id("g1")).is_some());
+        assert!(reloaded.get_task(&task_id("t1")).is_some());
+        assert_eq!(reloaded.list_tasks(&goal_id("g1")).len(), 1);
     }
 
     // Opening a path that doesn't exist should fail immediately.
