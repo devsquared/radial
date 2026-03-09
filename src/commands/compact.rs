@@ -16,8 +16,9 @@ pub struct CompactCandidate {
 pub fn analyze(goal: Option<&str>, db: &Database) -> Result<Vec<CompactCandidate>> {
     let goals = match goal {
         Some(id) => {
+            let goal_id: crate::id::GoalId = id.parse().map_err(|e| anyhow!("{e}"))?;
             let g = db
-                .get_goal(id)
+                .get_goal(&goal_id)
                 .ok_or_else(|| anyhow!("Goal not found: {id}"))?;
             vec![g]
         }
@@ -48,8 +49,9 @@ pub fn analyze(goal: Option<&str>, db: &Database) -> Result<Vec<CompactCandidate
 
 pub fn apply(task_id: &str, summary: String, db: &mut Database) -> Result<String> {
     let base = db.base_path().to_path_buf();
+    let tid: crate::id::TaskId = task_id.parse().map_err(|e| anyhow!("{e}"))?;
     let task = db
-        .get_task_mut(task_id)
+        .get_task_mut(&tid)
         .ok_or_else(|| anyhow!("Task not found: {task_id}"))?;
 
     if !task.compact(summary) {

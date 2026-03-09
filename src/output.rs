@@ -420,7 +420,7 @@ fn show_task(task: &Task, json: bool) -> Result<()> {
             }
             writeln!(w)?;
             field(w, "Priority", task.priority().as_ref())?;
-            field(w, "Goal", task.goal_id())?;
+            field(w, "Goal", task.goal_id().as_ref())?;
             field(w, "Created", &task.created_at().to_string())?;
             field(w, "Updated", &task.updated_at().to_string())?;
             return Ok(());
