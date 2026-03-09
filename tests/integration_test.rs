@@ -1255,3 +1255,42 @@ fn test_release_unassigned_task_fails() {
     assert!(result.is_err(), "Release on unassigned task should fail");
     assert!(result.unwrap_err().contains("no assignee"));
 }
+
+#[test]
+fn test_edit_task_blocked_by_validates_ids() {
+    let env = TestEnv::new();
+    env.run(&["init"]).expect("Init failed");
+
+    let output = env
+        .run(&["goal", "create", "Validation test"])
+        .expect("Create goal failed");
+    let goal_id = output
+        .lines()
+        .find(|line| line.contains("Created goal:"))
+        .and_then(|line| line.split_whitespace().nth(2))
+        .unwrap();
+
+    let output = env
+        .run(&["task", "create", goal_id, "A task"])
+        .expect("Create task failed");
+    let task_id = output
+        .lines()
+        .find(|line| line.contains("Created task:"))
+        .and_then(|line| line.split_whitespace().nth(2))
+        .unwrap();
+
+    // Editing blocked-by with a nonexistent task ID should fail
+    let result = env.run(&["edit", "task", task_id, "--blocked-by", "AAAAAAAA"]);
+    assert!(
+        result.is_err(),
+        "Edit with nonexistent blocked-by should fail"
+    );
+    let err = result.unwrap_err();
+    assert!(err.contains("Task not found in blocked-by list"));
+
+    // Editing blocked-by with self-reference should fail
+    let result = env.run(&["edit", "task", task_id, "--blocked-by", task_id]);
+    assert!(result.is_err(), "Edit with self-reference should fail");
+    let err = result.unwrap_err();
+    assert!(err.contains("cannot block itself"));
+}
