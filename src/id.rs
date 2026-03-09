@@ -3,6 +3,38 @@ use std::str::FromStr;
 
 use serde::{Deserialize, Serialize};
 
+/// Validate that an ID string is exactly 8 alphanumeric characters.
+fn validate_id(s: &str) -> Result<(), IdParseError> {
+    if s.len() != 8 {
+        return Err(IdParseError {
+            value: s.to_owned(),
+            reason: "must be exactly 8 characters",
+        });
+    }
+    if !s.chars().all(|c| c.is_ascii_alphanumeric()) {
+        return Err(IdParseError {
+            value: s.to_owned(),
+            reason: "must contain only alphanumeric characters (a-z, A-Z, 0-9)",
+        });
+    }
+    Ok(())
+}
+
+/// Error returned when parsing an invalid ID from CLI input.
+#[derive(Debug, Clone)]
+pub struct IdParseError {
+    value: String,
+    reason: &'static str,
+}
+
+impl fmt::Display for IdParseError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "invalid ID '{}': {}", self.value, self.reason)
+    }
+}
+
+impl std::error::Error for IdParseError {}
+
 /// Generate a safe 8-character ID
 /// Uses alphanumeric characters only (no dashes or underscores)
 /// to avoid conflicts with CLI flag parsing
@@ -49,9 +81,10 @@ impl From<String> for GoalId {
 }
 
 impl FromStr for GoalId {
-    type Err = std::convert::Infallible;
+    type Err = IdParseError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
+        validate_id(s)?;
         Ok(Self(s.to_owned()))
     }
 }
@@ -88,9 +121,10 @@ impl From<String> for TaskId {
 }
 
 impl FromStr for TaskId {
-    type Err = std::convert::Infallible;
+    type Err = IdParseError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
+        validate_id(s)?;
         Ok(Self(s.to_owned()))
     }
 }
@@ -147,5 +181,38 @@ mod tests {
     fn test_task_id_from_str() {
         let id: TaskId = "test5678".parse().unwrap();
         assert_eq!(id.as_ref(), "test5678");
+    }
+
+    #[test]
+    fn test_rejects_empty_string() {
+        assert!("".parse::<GoalId>().is_err());
+        assert!("".parse::<TaskId>().is_err());
+    }
+
+    #[test]
+    fn test_rejects_wrong_length() {
+        assert!("short".parse::<GoalId>().is_err());
+        assert!("waytoolong123".parse::<TaskId>().is_err());
+    }
+
+    #[test]
+    fn test_rejects_special_characters() {
+        assert!("test-123".parse::<GoalId>().is_err());
+        assert!("test_123".parse::<TaskId>().is_err());
+        assert!("test 123".parse::<GoalId>().is_err());
+    }
+
+    #[test]
+    fn test_error_message_includes_value() {
+        let err = "bad".parse::<GoalId>().unwrap_err();
+        assert!(err.to_string().contains("bad"));
+        assert!(err.to_string().contains("8 characters"));
+    }
+
+    #[test]
+    fn test_from_string_bypasses_validation() {
+        // From<String> is for internal use and does not validate
+        let id = GoalId::from("anything".to_string());
+        assert_eq!(id.as_ref(), "anything");
     }
 }
