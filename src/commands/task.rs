@@ -3,7 +3,7 @@ use jiff::{SignedDuration, Timestamp};
 
 use crate::db::Database;
 use crate::helpers::find_similar_id;
-use crate::id::generate_id;
+use crate::id::{GoalId, TaskId, generate_id};
 use crate::models::{
     Comment, Contract, GoalState, Outcome, Priority, Task, TaskMetrics, TaskState,
 };
@@ -12,17 +12,21 @@ use crate::models::{
 #[derive(Debug)]
 pub struct CompleteResult {
     pub task: Task,
-    pub unblocked_task_ids: Vec<String>,
+    pub unblocked_task_ids: Vec<TaskId>,
 }
 
-fn task_not_found_err(task_id: &str, db: &Database) -> anyhow::Error {
+fn task_not_found_err(task_id: &TaskId, db: &Database) -> anyhow::Error {
     let all_task_ids: Vec<&str> = db
         .list_goals()
         .iter()
-        .flat_map(|goal| db.list_tasks(goal.id()).into_iter().map(Task::id))
+        .flat_map(|goal| {
+            db.list_tasks(goal.id())
+                .into_iter()
+                .map(|t| t.id().as_ref())
+        })
         .collect();
 
-    if let Some(suggestion) = find_similar_id(task_id, &all_task_ids) {
+    if let Some(suggestion) = find_similar_id(task_id.as_ref(), &all_task_ids) {
         anyhow!("Task not found: {task_id}\nDid you mean: {suggestion}")
     } else {
         anyhow!("Task not found: {task_id}")
@@ -31,22 +35,22 @@ fn task_not_found_err(task_id: &str, db: &Database) -> anyhow::Error {
 
 #[allow(clippy::too_many_arguments)]
 pub fn create(
-    goal_id: &str,
+    goal_id: &GoalId,
     description: String,
     priority: Priority,
     receives: Option<String>,
     produces: Option<String>,
     verify: Option<String>,
-    blocked_by: Option<Vec<String>>,
+    blocked_by: Option<Vec<TaskId>>,
     db: &mut Database,
 ) -> Result<Task> {
     let goal = db.get_goal(goal_id);
 
     if goal.is_none() {
         let all_goals = db.list_goals();
-        let goal_ids: Vec<&str> = all_goals.iter().map(|g| g.id()).collect();
+        let goal_ids: Vec<&str> = all_goals.iter().map(|g| g.id().as_ref()).collect();
 
-        return if let Some(suggestion) = find_similar_id(goal_id, &goal_ids) {
+        return if let Some(suggestion) = find_similar_id(goal_id.as_ref(), &goal_ids) {
             Err(anyhow!(
                 "Goal not found: {goal_id}\nDid you mean: {suggestion}"
             ))
@@ -56,17 +60,19 @@ pub fn create(
     }
 
     let goal = goal.unwrap();
-    let goal_id_owned = goal.id().to_owned();
+    let goal_id_owned = goal.id().clone();
     let goal_state = goal.state();
 
     // Validate blocked_by task IDs exist
     if let Some(ref task_ids) = blocked_by {
         let all_tasks = db.list_tasks(&goal_id_owned);
-        let existing_task_ids: Vec<&str> = all_tasks.iter().map(|t| t.id()).collect();
+        let existing_task_ids: Vec<&str> = all_tasks.iter().map(|t| t.id().as_ref()).collect();
 
         for task_id in task_ids {
-            if !existing_task_ids.contains(&task_id.as_str()) {
-                return if let Some(suggestion) = find_similar_id(task_id, &existing_task_ids) {
+            if !existing_task_ids.contains(&task_id.as_ref()) {
+                return if let Some(suggestion) =
+                    find_similar_id(task_id.as_ref(), &existing_task_ids)
+                {
                     Err(anyhow!(
                         "Task not found in blocked-by list: {task_id}\nDid you mean: {suggestion}"
                     ))
@@ -98,7 +104,7 @@ pub fn create(
     };
     let now = Timestamp::now();
     let task = Task::new(
-        generate_id(),
+        TaskId::new(),
         goal_id_owned.clone(),
         description,
         priority,
@@ -125,7 +131,7 @@ pub fn create(
 }
 
 pub fn list(
-    goal_id: &str,
+    goal_id: &GoalId,
     priority: Option<&Priority>,
     assignee: Option<&str>,
     db: &Database,
@@ -144,7 +150,7 @@ pub fn list(
     Ok(tasks)
 }
 
-pub fn start(task_id: &str, assignee: &str, db: &mut Database) -> Result<Task> {
+pub fn start(task_id: &TaskId, assignee: &str, db: &mut Database) -> Result<Task> {
     let task = db.get_task(task_id);
 
     if task.is_none() {
@@ -161,9 +167,10 @@ pub fn start(task_id: &str, assignee: &str, db: &mut Database) -> Result<Task> {
     }
 
     if task.state() == TaskState::Blocked && !task.blocked_by().is_empty() {
+        let ids: Vec<&str> = task.blocked_by().iter().map(AsRef::as_ref).collect();
         return Err(anyhow!(
             "Task is blocked by: {}\nComplete those tasks first, or use --force to override.",
-            task.blocked_by().join(", ")
+            ids.join(", ")
         ));
     }
 
@@ -188,7 +195,7 @@ pub fn start(task_id: &str, assignee: &str, db: &mut Database) -> Result<Task> {
 }
 
 /// Collect IDs of all in-progress tasks across all goals.
-fn collect_in_progress_task_ids(db: &Database) -> Vec<String> {
+fn collect_in_progress_task_ids(db: &Database) -> Vec<TaskId> {
     db.list_goals()
         .iter()
         .flat_map(|goal| db.list_tasks(goal.id()))
@@ -262,7 +269,7 @@ pub fn find_stale_tasks(threshold: SignedDuration, db: &Database) -> Vec<&Task> 
 }
 
 pub fn complete(
-    task_id: &str,
+    task_id: &TaskId,
     result_summary: String,
     artifacts: Option<Vec<String>>,
     tokens: Option<i64>,
@@ -284,7 +291,7 @@ pub fn complete(
         ));
     }
 
-    let goal_id = task.goal_id().to_owned();
+    let goal_id = task.goal_id().clone();
     let retry_count = task.metrics().retry_count();
     let artifacts_list = artifacts.unwrap_or_default();
 
@@ -302,17 +309,17 @@ pub fn complete(
     let completed_task = task.clone();
 
     // Snapshot only the fields needed for unblocking
-    let tasks_snapshot: Vec<(String, TaskState, Vec<String>)> = db
+    let tasks_snapshot: Vec<(TaskId, TaskState, Vec<TaskId>)> = db
         .list_tasks(&goal_id)
         .iter()
         .filter(|t| t.state() == TaskState::Blocked)
-        .map(|t| (t.id().to_owned(), t.state(), t.blocked_by().to_vec()))
+        .map(|t| (t.id().clone(), t.state(), t.blocked_by().to_vec()))
         .collect();
 
     let mut unblocked_task_ids = Vec::new();
 
     for (dep_id, _, dep_blocked_by) in &tasks_snapshot {
-        if dep_blocked_by.contains(&task_id.to_owned()) {
+        if dep_blocked_by.contains(task_id) {
             let all_blockers_done = dep_blocked_by.iter().all(|blocker_id| {
                 db.get_task(blocker_id)
                     .is_some_and(|t| t.state() == TaskState::Completed)
@@ -351,7 +358,7 @@ pub fn complete(
     })
 }
 
-pub fn fail(task_id: &str, db: &mut Database) -> Result<Task> {
+pub fn fail(task_id: &TaskId, db: &mut Database) -> Result<Task> {
     let task = db.get_task(task_id);
 
     if task.is_none() {
@@ -382,7 +389,7 @@ pub fn fail(task_id: &str, db: &mut Database) -> Result<Task> {
     Ok(task.clone())
 }
 
-pub fn retry(task_id: &str, db: &mut Database) -> Result<Task> {
+pub fn retry(task_id: &TaskId, db: &mut Database) -> Result<Task> {
     let task = db.get_task(task_id);
 
     if task.is_none() {
@@ -408,7 +415,7 @@ pub fn retry(task_id: &str, db: &mut Database) -> Result<Task> {
     Ok(task.clone())
 }
 
-pub fn release(task_id: &str, db: &mut Database) -> Result<Task> {
+pub fn release(task_id: &TaskId, db: &mut Database) -> Result<Task> {
     if db.get_task(task_id).is_none() {
         return Err(task_not_found_err(task_id, db));
     }
@@ -426,7 +433,7 @@ pub fn release(task_id: &str, db: &mut Database) -> Result<Task> {
     Ok(task.clone())
 }
 
-pub fn delete(task_id: &str, db: &mut Database) -> Result<Task> {
+pub fn delete(task_id: &TaskId, db: &mut Database) -> Result<Task> {
     let task = db
         .get_task(task_id)
         .ok_or_else(|| task_not_found_err(task_id, db))?;
@@ -444,7 +451,7 @@ pub fn delete(task_id: &str, db: &mut Database) -> Result<Task> {
     Ok(task)
 }
 
-pub fn comment(task_id: &str, text: String, db: &mut Database) -> Result<Task> {
+pub fn comment(task_id: &TaskId, text: String, db: &mut Database) -> Result<Task> {
     if db.get_task(task_id).is_none() {
         return Err(task_not_found_err(task_id, db));
     }

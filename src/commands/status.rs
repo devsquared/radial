@@ -2,6 +2,8 @@ use anyhow::{Result, anyhow};
 use serde::Serialize;
 
 use crate::db::Database;
+use crate::id::GoalId;
+use crate::id::TaskId;
 use crate::models::{Goal, Metrics, Task};
 
 #[derive(Debug, Serialize)]
@@ -52,8 +54,8 @@ pub enum StatusResult {
 }
 
 pub fn run(
-    goal_id: Option<String>,
-    task_id: Option<String>,
+    goal_id: Option<GoalId>,
+    task_id: Option<TaskId>,
     assignee: Option<String>,
     db: &Database,
 ) -> Result<StatusResult> {
@@ -68,13 +70,13 @@ pub fn run(
     Ok(StatusResult::AllGoals(get_all_goals(db)))
 }
 
-fn get_task(task_id: &str, db: &Database) -> Result<Task> {
+fn get_task(task_id: &TaskId, db: &Database) -> Result<Task> {
     db.get_task(task_id)
         .cloned()
         .ok_or_else(|| anyhow!("Task not found: {task_id}"))
 }
 
-fn get_goal(goal_id: &str, assignee: Option<&str>, db: &Database) -> Result<GoalStatus> {
+fn get_goal(goal_id: &GoalId, assignee: Option<&str>, db: &Database) -> Result<GoalStatus> {
     let goal = db
         .get_goal(goal_id)
         .ok_or_else(|| anyhow!("Goal not found: {goal_id}"))?

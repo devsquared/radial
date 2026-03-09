@@ -2,13 +2,13 @@ use anyhow::Result;
 use jiff::Timestamp;
 
 use crate::db::Database;
-use crate::id::generate_id;
+use crate::id::GoalId;
 use crate::models::{Goal, GoalState, Metrics};
 
 pub fn create(description: String, db: &mut Database) -> Result<Goal> {
     let now = Timestamp::now();
     let goal = Goal::new(
-        generate_id(),
+        GoalId::new(),
         None,
         description,
         GoalState::Pending,

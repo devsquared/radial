@@ -12,7 +12,7 @@ pub mod models;
 pub mod output;
 
 use anyhow::{Context, Result, anyhow};
-use cli::{Cli, Commands, EditCommands, GoalCommands, TaskCommands};
+use cli::{Cli, Commands, CompactCommands, EditCommands, GoalCommands, TaskCommands};
 use db::Database;
 use std::path::PathBuf;
 
@@ -149,8 +149,9 @@ fn run_task(task_cmd: TaskCommands, db: &mut Database) -> Result<()> {
             stale,
             all_in_progress,
         } => {
-            if let Some(task_id) = task_id {
-                let task = commands::task::release(&task_id, db)?;
+            if let Some(ref task_id_str) = task_id {
+                let tid: crate::id::TaskId = task_id_str.parse().map_err(|e| anyhow!("{e}"))?;
+                let task = commands::task::release(&tid, db)?;
                 output::task_released(&task)
             } else if let Some(duration_str) = stale {
                 let threshold = crate::duration::parse_duration(&duration_str)?;
@@ -260,6 +261,19 @@ pub fn run(cli: Cli) -> Result<()> {
             let db = ensure_initialized()?;
             let text = commands::prep::run(&db);
             output::prep(&text)
+        }
+        Commands::Compact(compact_cmd) => {
+            let mut db = ensure_initialized()?;
+            match compact_cmd {
+                CompactCommands::Analyze { goal, json } => {
+                    let candidates = commands::compact::analyze(goal.as_deref(), &db)?;
+                    output::compact_analyze(&candidates, json)
+                }
+                CompactCommands::Apply { task_id, summary } => {
+                    let id = commands::compact::apply(&task_id, summary, &mut db)?;
+                    output::compact_apply(&id)
+                }
+            }
         }
     }
 }

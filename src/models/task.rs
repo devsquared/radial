@@ -9,6 +9,7 @@ use strum::{AsRefStr, EnumString};
 
 use super::{Comment, Contract, Outcome};
 use crate::db::atomic_write;
+use crate::id::{GoalId, TaskId};
 use crate::output::Render;
 
 #[derive(
@@ -68,8 +69,8 @@ impl TaskMetrics {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Task {
-    id: String,
-    goal_id: String,
+    id: TaskId,
+    goal_id: GoalId,
     description: String,
     #[serde(default)]
     priority: Priority,
@@ -77,7 +78,7 @@ pub struct Task {
     contract: Option<Contract>,
     state: TaskState,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    blocked_by: Vec<String>,
+    blocked_by: Vec<TaskId>,
     #[serde(skip_serializing_if = "Option::is_none")]
     assignee: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -91,18 +92,22 @@ pub struct Task {
     metrics: TaskMetrics,
     #[serde(default)]
     comments: Vec<Comment>,
+    #[serde(default)]
+    compacted: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    summary: Option<String>,
 }
 
 impl Task {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
-        id: String,
-        goal_id: String,
+        id: TaskId,
+        goal_id: GoalId,
         description: String,
         priority: Priority,
         contract: Option<Contract>,
         state: TaskState,
-        blocked_by: Vec<String>,
+        blocked_by: Vec<TaskId>,
         created_at: Timestamp,
         updated_at: Timestamp,
     ) -> Self {
@@ -122,6 +127,8 @@ impl Task {
             completed_at: None,
             metrics: TaskMetrics::default(),
             comments: Vec::new(),
+            compacted: false,
+            summary: None,
         }
     }
 
@@ -131,11 +138,11 @@ impl Task {
         self
     }
 
-    pub fn id(&self) -> &str {
+    pub fn id(&self) -> &TaskId {
         &self.id
     }
 
-    pub fn goal_id(&self) -> &str {
+    pub fn goal_id(&self) -> &GoalId {
         &self.goal_id
     }
 
@@ -155,7 +162,7 @@ impl Task {
         self.state
     }
 
-    pub fn blocked_by(&self) -> &[String] {
+    pub fn blocked_by(&self) -> &[TaskId] {
         &self.blocked_by
     }
 
@@ -183,6 +190,32 @@ impl Task {
         &self.comments
     }
 
+    pub fn compacted(&self) -> bool {
+        self.compacted
+    }
+
+    pub fn summary(&self) -> Option<&str> {
+        self.summary.as_deref()
+    }
+
+    /// Compact this task by replacing heavy fields with a summary.
+    /// Only valid for Completed or Failed tasks that aren't already compacted.
+    pub fn compact(&mut self, summary: String) -> bool {
+        if self.compacted {
+            return false;
+        }
+        if self.state != TaskState::Completed && self.state != TaskState::Failed {
+            return false;
+        }
+        self.compacted = true;
+        self.summary = Some(summary);
+        self.description = "[compacted]".to_string();
+        self.contract = None;
+        self.comments = Vec::new();
+        self.updated_at = Timestamp::now();
+        true
+    }
+
     pub fn set_description(&mut self, description: String) {
         self.description = description;
         self.updated_at = Timestamp::now();
@@ -198,7 +231,7 @@ impl Task {
         self.updated_at = Timestamp::now();
     }
 
-    pub fn set_blocked_by(&mut self, blocked_by: Vec<String>) {
+    pub fn set_blocked_by(&mut self, blocked_by: Vec<TaskId>) {
         self.blocked_by = blocked_by;
         self.updated_at = Timestamp::now();
     }
@@ -228,7 +261,8 @@ impl Task {
     }
 
     pub fn file_path(&self, base: &Path) -> PathBuf {
-        base.join(&self.goal_id).join(format!("{}.toml", self.id))
+        base.join(self.goal_id.as_ref())
+            .join(format!("{}.toml", self.id))
     }
 
     pub fn write_file(&self, base: &Path) -> Result<()> {
@@ -304,6 +338,16 @@ impl Render for Task {
             style(self.state.as_ref()).yellow(),
             self.priority.as_ref(),
         )?;
+
+        if self.compacted {
+            if let Some(ref summary) = self.summary {
+                writeln!(w, "  {} {}", style("[compacted]").dim(), summary)?;
+            } else {
+                writeln!(w, "  {}", style("[compacted]").dim())?;
+            }
+            return Ok(());
+        }
+
         writeln!(w, "  {}", &self.description)?;
 
         if let Some(assignee) = &self.assignee {
@@ -323,7 +367,8 @@ impl Render for Task {
         }
 
         if !self.blocked_by.is_empty() {
-            writeln!(w, "  Blocked by: {}", self.blocked_by.join(", "))?;
+            let ids: Vec<&str> = self.blocked_by.iter().map(AsRef::as_ref).collect();
+            writeln!(w, "  Blocked by: {}", ids.join(", "))?;
         }
 
         if let Some(result) = &self.result {
@@ -339,6 +384,7 @@ impl Render for Task {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::id::{GoalId, TaskId};
     use crate::output::Render;
     use rstest::{fixture, rstest};
 
@@ -346,8 +392,8 @@ mod tests {
     fn task() -> Task {
         let now = Timestamp::now();
         Task {
-            id: "t_abc123".to_string(),
-            goal_id: "g_xyz789".to_string(),
+            id: TaskId::from("t_abc123".to_string()),
+            goal_id: GoalId::from("g_xyz789".to_string()),
             description: "test task".to_string(),
             priority: Priority::default(),
             contract: None,
@@ -361,6 +407,8 @@ mod tests {
             completed_at: None,
             metrics: TaskMetrics::default(),
             comments: Vec::new(),
+            compacted: false,
+            summary: None,
         }
     }
 
@@ -559,7 +607,7 @@ mod tests {
     #[rstest]
     fn render_includes_blocked_by(mut task: Task) {
         task.state = TaskState::Blocked;
-        task.blocked_by = vec!["t_other".to_string()];
+        task.blocked_by = vec![TaskId::from("t_other".to_string())];
         let output = render_to_string(&task);
         assert!(output.contains("Blocked by: t_other"));
     }
@@ -682,5 +730,81 @@ mod tests {
         let outcome = Outcome::new("done".to_string(), Vec::new());
         task.complete(outcome, TaskMetrics::default());
         assert_eq!(task.started_at, Some(ts));
+    }
+
+    // -- compact --
+
+    // Compacting a completed task should set compacted=true, store the summary,
+    // replace description, clear contract and comments, and bump updated_at.
+    #[rstest]
+    fn compact_completed_task(mut task: Task) {
+        task.state = TaskState::Completed;
+        task.contract = Some(Contract::new(
+            "input".to_string(),
+            "output".to_string(),
+            "verify".to_string(),
+        ));
+        task.comments = vec![Comment::new(
+            "c1".to_string(),
+            "a comment".to_string(),
+            Timestamp::now(),
+        )];
+        let before = task.updated_at;
+
+        assert!(task.compact("Summarized the task.".to_string()));
+        assert!(task.compacted);
+        assert_eq!(task.summary.as_deref(), Some("Summarized the task."));
+        assert_eq!(task.description, "[compacted]");
+        assert!(task.contract.is_none());
+        assert!(task.comments.is_empty());
+        assert!(task.updated_at >= before);
+    }
+
+    // Compacting a failed task should also work.
+    #[rstest]
+    fn compact_failed_task(mut task: Task) {
+        task.state = TaskState::Failed;
+        assert!(task.compact("Failed task summary.".to_string()));
+        assert!(task.compacted);
+        assert_eq!(task.summary.as_deref(), Some("Failed task summary."));
+    }
+
+    // Compacting a pending task should be rejected.
+    #[rstest]
+    #[case::pending(TaskState::Pending)]
+    #[case::blocked(TaskState::Blocked)]
+    #[case::in_progress(TaskState::InProgress)]
+    fn compact_rejects_active_states(mut task: Task, #[case] state: TaskState) {
+        task.state = state;
+        assert!(!task.compact("nope".to_string()));
+        assert!(!task.compacted);
+        assert!(task.summary.is_none());
+    }
+
+    // Compacting an already-compacted task should be rejected.
+    #[rstest]
+    fn compact_rejects_already_compacted(mut task: Task) {
+        task.state = TaskState::Completed;
+        assert!(task.compact("first".to_string()));
+        assert!(!task.compact("second".to_string()));
+        assert_eq!(task.summary.as_deref(), Some("first"));
+    }
+
+    // Render of a compacted task should show [compacted] and the summary,
+    // not the contract or full description.
+    #[rstest]
+    fn render_compacted_task(mut task: Task) {
+        task.state = TaskState::Completed;
+        task.contract = Some(Contract::new(
+            "input".to_string(),
+            "output".to_string(),
+            "verify".to_string(),
+        ));
+        task.compact("This is the summary.".to_string());
+        let output = render_to_string(&task);
+        assert!(output.contains("[compacted]"));
+        assert!(output.contains("This is the summary."));
+        assert!(!output.contains("input"));
+        assert!(!output.contains("Receives"));
     }
 }

@@ -8,6 +8,7 @@ use serde::{Deserialize, Serialize};
 use strum::{AsRefStr, EnumString};
 
 use crate::db::atomic_write;
+use crate::id::GoalId;
 use crate::output::Render;
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, AsRefStr, EnumString)]
@@ -96,9 +97,9 @@ impl Render for Metrics {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Goal {
-    id: String,
+    id: GoalId,
     #[serde(skip_serializing_if = "Option::is_none")]
-    parent_id: Option<String>,
+    parent_id: Option<GoalId>,
     description: String,
     state: GoalState,
     created_at: Timestamp,
@@ -111,8 +112,8 @@ pub struct Goal {
 impl Goal {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
-        id: String,
-        parent_id: Option<String>,
+        id: GoalId,
+        parent_id: Option<GoalId>,
         description: String,
         state: GoalState,
         created_at: Timestamp,
@@ -132,12 +133,12 @@ impl Goal {
         }
     }
 
-    pub fn id(&self) -> &str {
+    pub fn id(&self) -> &GoalId {
         &self.id
     }
 
-    pub fn parent_id(&self) -> Option<&str> {
-        self.parent_id.as_deref()
+    pub fn parent_id(&self) -> Option<&GoalId> {
+        self.parent_id.as_ref()
     }
 
     pub fn description(&self) -> &str {
@@ -191,7 +192,7 @@ impl Goal {
     }
 
     pub fn file_path(&self, base: &Path) -> PathBuf {
-        base.join(&self.id).join("goal.toml")
+        base.join(self.id.as_ref()).join("goal.toml")
     }
 
     pub fn write_file(&self, base: &Path) -> Result<()> {
