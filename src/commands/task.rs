@@ -1,5 +1,5 @@
 use anyhow::{Result, anyhow};
-use jiff::Timestamp;
+use jiff::{SignedDuration, Timestamp};
 
 use crate::db::Database;
 use crate::helpers::find_similar_id;
@@ -192,6 +192,80 @@ pub fn start(task_id: &TaskId, assignee: &str, db: &mut Database) -> Result<Task
     task.write_file(&base)?;
 
     Ok(task.clone())
+}
+
+/// Collect IDs of all in-progress tasks across all goals.
+fn collect_in_progress_task_ids(db: &Database) -> Vec<TaskId> {
+    db.list_goals()
+        .iter()
+        .flat_map(|goal| db.list_tasks(goal.id()))
+        .filter(|t| t.state() == TaskState::InProgress)
+        .map(|t| t.id().to_owned())
+        .collect()
+}
+
+/// Release all in-progress tasks whose start time exceeds the given duration.
+///
+/// Falls back to `updated_at` for tasks without a `started_at` timestamp
+/// (i.e. tasks started before this feature was added).
+pub fn release_stale(threshold: SignedDuration, db: &mut Database) -> Result<Vec<Task>> {
+    let cutoff = Timestamp::now().checked_sub(threshold)?;
+    let task_ids = collect_in_progress_task_ids(db);
+
+    let mut stale_ids = Vec::new();
+    for id in &task_ids {
+        let task = db.get_task(id).unwrap();
+        let started = task.started_at().unwrap_or_else(|| task.updated_at());
+        if started <= cutoff {
+            stale_ids.push(id.clone());
+        }
+    }
+
+    let base = db.base_path().to_owned();
+    let mut released = Vec::new();
+    for id in &stale_ids {
+        let task = db.get_task_mut(id).unwrap();
+        task.release();
+        task.write_file(&base)?;
+        released.push(task.clone());
+    }
+
+    Ok(released)
+}
+
+/// Release every in-progress task regardless of how long it has been running.
+pub fn release_all_in_progress(db: &mut Database) -> Result<Vec<Task>> {
+    let task_ids = collect_in_progress_task_ids(db);
+    let base = db.base_path().to_owned();
+
+    let mut released = Vec::new();
+    for id in &task_ids {
+        let task = db.get_task_mut(id).unwrap();
+        task.release();
+        task.write_file(&base)?;
+        released.push(task.clone());
+    }
+
+    Ok(released)
+}
+
+/// Find all in-progress tasks that have been running longer than the given threshold.
+/// Used by prep to surface stale task advisories.
+pub fn find_stale_tasks(threshold: SignedDuration, db: &Database) -> Vec<&Task> {
+    let Ok(cutoff) = Timestamp::now().checked_sub(threshold) else {
+        return Vec::new();
+    };
+    db.list_goals()
+        .iter()
+        .flat_map(|goal| db.list_tasks(goal.id()))
+        .filter(|t| {
+            if t.state() != TaskState::InProgress {
+                return false;
+            }
+            let started = t.started_at().unwrap_or_else(|| t.updated_at());
+            started <= cutoff
+        })
+        .collect()
 }
 
 pub fn complete(

@@ -225,8 +225,16 @@ pub enum TaskCommands {
 
     /// Release a claimed task back to pending
     Release {
-        /// The task ID to release
-        task_id: TaskId,
+        /// The task ID to release (mutually exclusive with --stale and --all-in-progress)
+        task_id: Option<String>,
+
+        /// Release tasks in progress longer than this duration (e.g. 1h, 30m, 2h30m)
+        #[arg(long, conflicts_with = "task_id")]
+        stale: Option<String>,
+
+        /// Release all in-progress tasks regardless of duration
+        #[arg(long, conflicts_with_all = ["task_id", "stale"])]
+        all_in_progress: bool,
     },
 
     /// Delete a pending task

@@ -58,6 +58,8 @@ rd task complete <task_id> --result "Done" --tokens 1500 --elapsed 30000
 rd task fail <task_id>                           # Mark as failed
 rd task retry <task_id>                          # Retry a failed task
 rd task release <task_id>                        # Release claim, back to pending
+rd task release --stale 1h                       # Release tasks in progress > 1 hour
+rd task release --all-in-progress                # Release all in-progress tasks
 rd task delete <task_id>                         # Delete a pending task
 ```
 
@@ -127,6 +129,13 @@ rd clean --force             # Remove all goals regardless of status
 - Only `in_progress` tasks can be completed.
 - Only `in_progress` or `verifying` tasks can be failed.
 - Only `failed` tasks can be retried.
+
+### Stale Task Recovery
+
+If an agent session crashes, its claimed tasks stay in progress forever. Use these commands to recover:
+
+- `rd task release --stale 1h` — release tasks that have been in progress for over 1 hour
+- `rd task release --all-in-progress` — release all in-progress tasks (hard reset)
 
 ### JSON Output
 
