@@ -59,7 +59,7 @@ pub fn task(
 
         // Check for cycles
         if let Some(cycle_path) = detect_cycle(task_id, dep_ids, &all_tasks) {
-            let path_str: Vec<String> = cycle_path.iter().map(|id| id.to_string()).collect();
+            let path_str: Vec<String> = cycle_path.iter().map(ToString::to_string).collect();
             return Err(anyhow!(
                 "Circular dependency detected: {}",
                 path_str.join(" -> ")
