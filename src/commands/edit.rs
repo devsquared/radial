@@ -1,9 +1,11 @@
 use anyhow::{Result, anyhow};
 
 use crate::db::Database;
+use crate::helpers::{detect_cycle, find_similar_id};
+use crate::id::{GoalId, TaskId};
 use crate::models::{Contract, Goal, Priority, Task};
 
-pub fn goal(goal_id: &str, description: String, db: &mut Database) -> Result<Goal> {
+pub fn goal(goal_id: &GoalId, description: String, db: &mut Database) -> Result<Goal> {
     let base = db.base_path().to_path_buf();
     let goal = db
         .get_goal_mut(goal_id)
@@ -16,19 +18,57 @@ pub fn goal(goal_id: &str, description: String, db: &mut Database) -> Result<Goa
 
 #[allow(clippy::too_many_arguments)]
 pub fn task(
-    task_id: &str,
+    task_id: &TaskId,
     description: Option<String>,
     priority: Option<Priority>,
     receives: Option<String>,
     produces: Option<String>,
     verify: Option<String>,
-    blocked_by: Option<Vec<String>>,
+    blocked_by: Option<Vec<TaskId>>,
     db: &mut Database,
 ) -> Result<Task> {
-    let base = db.base_path().to_path_buf();
+    // Read the task (immutable) to get its goal_id and validate blocked_by
     let task = db
-        .get_task_mut(task_id)
+        .get_task(task_id)
         .ok_or_else(|| anyhow!("Task not found: {task_id}"))?;
+    let goal_id = task.goal_id().clone();
+
+    // Validate blocked_by task IDs exist in the same goal
+    if let Some(ref dep_ids) = blocked_by {
+        let all_tasks = db.list_tasks(&goal_id);
+        let existing_task_ids: Vec<&str> = all_tasks.iter().map(|t| t.id().as_ref()).collect();
+
+        for dep_id in dep_ids {
+            if dep_id == task_id {
+                return Err(anyhow!("Task cannot block itself: {dep_id}"));
+            }
+            if !existing_task_ids.contains(&dep_id.as_ref()) {
+                return if let Some(suggestion) =
+                    find_similar_id(dep_id.as_ref(), &existing_task_ids)
+                {
+                    Err(anyhow!(
+                        "Task not found in blocked-by list: {dep_id}\nDid you mean: {suggestion}"
+                    ))
+                } else {
+                    Err(anyhow!(
+                        "Task not found in blocked-by list: {dep_id}\nTask must exist in the same goal."
+                    ))
+                };
+            }
+        }
+
+        // Check for cycles
+        if let Some(cycle_path) = detect_cycle(task_id, dep_ids, &all_tasks) {
+            let path_str: Vec<String> = cycle_path.iter().map(ToString::to_string).collect();
+            return Err(anyhow!(
+                "Circular dependency detected: {}",
+                path_str.join(" -> ")
+            ));
+        }
+    }
+
+    let base = db.base_path().to_path_buf();
+    let task = db.get_task_mut(task_id).unwrap();
 
     if let Some(desc) = description {
         task.set_description(desc);

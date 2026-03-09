@@ -9,6 +9,7 @@ use strum::{AsRefStr, EnumString};
 
 use super::{Comment, Contract, Outcome};
 use crate::db::atomic_write;
+use crate::id::{GoalId, TaskId};
 use crate::output::Render;
 
 #[derive(
@@ -68,8 +69,8 @@ impl TaskMetrics {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Task {
-    id: String,
-    goal_id: String,
+    id: TaskId,
+    goal_id: GoalId,
     description: String,
     #[serde(default)]
     priority: Priority,
@@ -77,7 +78,7 @@ pub struct Task {
     contract: Option<Contract>,
     state: TaskState,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    blocked_by: Vec<String>,
+    blocked_by: Vec<TaskId>,
     #[serde(skip_serializing_if = "Option::is_none")]
     assignee: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -98,13 +99,13 @@ pub struct Task {
 impl Task {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
-        id: String,
-        goal_id: String,
+        id: TaskId,
+        goal_id: GoalId,
         description: String,
         priority: Priority,
         contract: Option<Contract>,
         state: TaskState,
-        blocked_by: Vec<String>,
+        blocked_by: Vec<TaskId>,
         created_at: Timestamp,
         updated_at: Timestamp,
     ) -> Self {
@@ -134,11 +135,11 @@ impl Task {
         self
     }
 
-    pub fn id(&self) -> &str {
+    pub fn id(&self) -> &TaskId {
         &self.id
     }
 
-    pub fn goal_id(&self) -> &str {
+    pub fn goal_id(&self) -> &GoalId {
         &self.goal_id
     }
 
@@ -158,7 +159,7 @@ impl Task {
         self.state
     }
 
-    pub fn blocked_by(&self) -> &[String] {
+    pub fn blocked_by(&self) -> &[TaskId] {
         &self.blocked_by
     }
 
@@ -227,7 +228,7 @@ impl Task {
         self.updated_at = Timestamp::now();
     }
 
-    pub fn set_blocked_by(&mut self, blocked_by: Vec<String>) {
+    pub fn set_blocked_by(&mut self, blocked_by: Vec<TaskId>) {
         self.blocked_by = blocked_by;
         self.updated_at = Timestamp::now();
     }
@@ -252,7 +253,8 @@ impl Task {
     }
 
     pub fn file_path(&self, base: &Path) -> PathBuf {
-        base.join(&self.goal_id).join(format!("{}.toml", self.id))
+        base.join(self.goal_id.as_ref())
+            .join(format!("{}.toml", self.id))
     }
 
     pub fn write_file(&self, base: &Path) -> Result<()> {
@@ -351,7 +353,8 @@ impl Render for Task {
         }
 
         if !self.blocked_by.is_empty() {
-            writeln!(w, "  Blocked by: {}", self.blocked_by.join(", "))?;
+            let ids: Vec<&str> = self.blocked_by.iter().map(AsRef::as_ref).collect();
+            writeln!(w, "  Blocked by: {}", ids.join(", "))?;
         }
 
         if let Some(result) = &self.result {
@@ -367,6 +370,7 @@ impl Render for Task {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::id::{GoalId, TaskId};
     use crate::output::Render;
     use rstest::{fixture, rstest};
 
@@ -374,8 +378,8 @@ mod tests {
     fn task() -> Task {
         let now = Timestamp::now();
         Task {
-            id: "t_abc123".to_string(),
-            goal_id: "g_xyz789".to_string(),
+            id: TaskId::from("t_abc123".to_string()),
+            goal_id: GoalId::from("g_xyz789".to_string()),
             description: "test task".to_string(),
             priority: Priority::default(),
             contract: None,
@@ -588,7 +592,7 @@ mod tests {
     #[rstest]
     fn render_includes_blocked_by(mut task: Task) {
         task.state = TaskState::Blocked;
-        task.blocked_by = vec!["t_other".to_string()];
+        task.blocked_by = vec![TaskId::from("t_other".to_string())];
         let output = render_to_string(&task);
         assert!(output.contains("Blocked by: t_other"));
     }

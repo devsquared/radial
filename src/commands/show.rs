@@ -3,6 +3,7 @@ use serde::Serialize;
 
 use crate::db::Database;
 use crate::helpers::find_similar_id;
+use crate::id::{GoalId, TaskId};
 use crate::models::{Goal, Metrics, Task};
 
 /// Full detail view of either a goal or a task.
@@ -20,13 +21,15 @@ pub enum ShowResult {
 
 pub fn run(id: &str, db: &Database) -> Result<ShowResult> {
     // Try task first (more common lookup), then goal
-    if let Some(task) = db.get_task(id) {
+    let task_id = TaskId::from(id.to_owned());
+    if let Some(task) = db.get_task(&task_id) {
         return Ok(ShowResult::Task(task.clone()));
     }
 
-    if let Some(goal) = db.get_goal(id) {
-        let tasks: Vec<Task> = db.list_tasks(id).into_iter().cloned().collect();
-        let metrics = db.compute_goal_metrics(id);
+    let goal_id = GoalId::from(id.to_owned());
+    if let Some(goal) = db.get_goal(&goal_id) {
+        let tasks: Vec<Task> = db.list_tasks(&goal_id).into_iter().cloned().collect();
+        let metrics = db.compute_goal_metrics(&goal_id);
         return Ok(ShowResult::Goal {
             goal: goal.clone(),
             tasks,

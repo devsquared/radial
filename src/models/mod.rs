@@ -9,3 +9,6 @@ pub use contract::Contract;
 pub use goal::{Goal, GoalState, Metrics};
 pub use outcome::Outcome;
 pub use task::{Priority, Task, TaskMetrics, TaskState};
+
+// Re-export ID types for convenience
+pub use crate::id::{GoalId, TaskId};

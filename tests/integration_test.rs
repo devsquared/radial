@@ -1520,3 +1520,105 @@ fn test_prep_shows_compaction_advisory() {
     let output = env.run(&["prep"]).expect("Prep failed");
     assert!(!output.contains("Compaction"));
 }
+
+#[test]
+fn test_edit_task_blocked_by_validates_ids() {
+    let env = TestEnv::new();
+    env.run(&["init"]).expect("Init failed");
+
+    let output = env
+        .run(&["goal", "create", "Validation test"])
+        .expect("Create goal failed");
+    let goal_id = output
+        .lines()
+        .find(|line| line.contains("Created goal:"))
+        .and_then(|line| line.split_whitespace().nth(2))
+        .unwrap();
+
+    let output = env
+        .run(&["task", "create", goal_id, "A task"])
+        .expect("Create task failed");
+    let task_id = output
+        .lines()
+        .find(|line| line.contains("Created task:"))
+        .and_then(|line| line.split_whitespace().nth(2))
+        .unwrap();
+
+    // Editing blocked-by with a nonexistent task ID should fail
+    let result = env.run(&["edit", "task", task_id, "--blocked-by", "AAAAAAAA"]);
+    assert!(
+        result.is_err(),
+        "Edit with nonexistent blocked-by should fail"
+    );
+    let err = result.unwrap_err();
+    assert!(err.contains("Task not found in blocked-by list"));
+
+    // Editing blocked-by with self-reference should fail
+    let result = env.run(&["edit", "task", task_id, "--blocked-by", task_id]);
+    assert!(result.is_err(), "Edit with self-reference should fail");
+    let err = result.unwrap_err();
+    assert!(err.contains("cannot block itself"));
+}
+
+#[test]
+fn test_edit_task_blocked_by_rejects_cycles() {
+    let env = TestEnv::new();
+    env.run(&["init"]).expect("Init failed");
+
+    let output = env
+        .run(&["goal", "create", "Cycle test"])
+        .expect("Create goal failed");
+    let goal_id = output
+        .lines()
+        .find(|line| line.contains("Created goal:"))
+        .and_then(|line| line.split_whitespace().nth(2))
+        .unwrap();
+
+    // Create task A
+    let output = env
+        .run(&["task", "create", goal_id, "Task A"])
+        .expect("Create task A failed");
+    let task_a = output
+        .lines()
+        .find(|line| line.contains("Created task:"))
+        .and_then(|line| line.split_whitespace().nth(2))
+        .unwrap()
+        .to_string();
+
+    // Create task B blocked by A
+    let output = env
+        .run(&["task", "create", goal_id, "Task B", "--blocked-by", &task_a])
+        .expect("Create task B failed");
+    let task_b = output
+        .lines()
+        .find(|line| line.contains("Created task:"))
+        .and_then(|line| line.split_whitespace().nth(2))
+        .unwrap()
+        .to_string();
+
+    // Try to edit A to be blocked by B — should fail with cycle error
+    let result = env.run(&["edit", "task", &task_a, "--blocked-by", &task_b]);
+    assert!(result.is_err(), "Edit creating a cycle should fail");
+    let err = result.unwrap_err();
+    assert!(err.contains("Circular dependency detected"));
+
+    // Create task C blocked by B
+    let output = env
+        .run(&["task", "create", goal_id, "Task C", "--blocked-by", &task_b])
+        .expect("Create task C failed");
+    let task_c = output
+        .lines()
+        .find(|line| line.contains("Created task:"))
+        .and_then(|line| line.split_whitespace().nth(2))
+        .unwrap()
+        .to_string();
+
+    // Try to edit A to be blocked by C — transitive cycle: A -> C -> B -> A
+    let result = env.run(&["edit", "task", &task_a, "--blocked-by", &task_c]);
+    assert!(
+        result.is_err(),
+        "Edit creating a transitive cycle should fail"
+    );
+    let err = result.unwrap_err();
+    assert!(err.contains("Circular dependency detected"));
+}

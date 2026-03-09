@@ -433,7 +433,7 @@ fn show_task(task: &Task, json: bool) -> Result<()> {
 
         writeln!(w)?;
         field(w, "Priority", task.priority().as_ref())?;
-        field(w, "Goal", task.goal_id())?;
+        field(w, "Goal", task.goal_id().as_ref())?;
         if let Some(assignee) = task.assignee() {
             field(w, "Assignee", assignee)?;
         }
@@ -461,7 +461,8 @@ fn show_task(task: &Task, json: bool) -> Result<()> {
 
         if !task.blocked_by().is_empty() {
             writeln!(w)?;
-            field(w, "Blocked by", &task.blocked_by().join(", "))?;
+            let ids: Vec<&str> = task.blocked_by().iter().map(AsRef::as_ref).collect();
+            field(w, "Blocked by", &ids.join(", "))?;
         }
 
         if let Some(result) = task.result() {

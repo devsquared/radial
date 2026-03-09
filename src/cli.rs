@@ -1,5 +1,6 @@
 use clap::{Parser, Subcommand};
 
+use crate::id::{GoalId, TaskId};
 use crate::models::Priority;
 
 #[derive(Parser)]
@@ -64,11 +65,11 @@ pub enum Commands {
     Status {
         /// Show status of a specific goal
         #[arg(long)]
-        goal: Option<String>,
+        goal: Option<GoalId>,
 
         /// Show status of a specific task
         #[arg(long)]
-        task: Option<String>,
+        task: Option<TaskId>,
 
         /// Filter tasks by assignee
         #[arg(long)]
@@ -82,7 +83,7 @@ pub enum Commands {
     /// Show tasks ready to be worked on
     Ready {
         /// The goal ID to check for ready tasks
-        goal_id: String,
+        goal_id: GoalId,
 
         /// Filter by priority level (p0, p1, p2, p3)
         #[arg(long)]
@@ -126,7 +127,7 @@ pub enum TaskCommands {
     /// Create a new task
     Create {
         /// The goal ID this task belongs to
-        goal_id: String,
+        goal_id: GoalId,
 
         /// Task description
         description: String,
@@ -149,7 +150,7 @@ pub enum TaskCommands {
 
         /// IDs of tasks this task is blocked by
         #[arg(long, value_delimiter = ',')]
-        blocked_by: Option<Vec<String>>,
+        blocked_by: Option<Vec<TaskId>>,
 
         /// Output as JSON
         #[arg(long)]
@@ -159,7 +160,7 @@ pub enum TaskCommands {
     /// List tasks for a goal
     List {
         /// The goal ID to list tasks for
-        goal_id: String,
+        goal_id: GoalId,
 
         /// Filter by priority level (p0, p1, p2, p3)
         #[arg(long)]
@@ -181,7 +182,7 @@ pub enum TaskCommands {
     /// Mark a task as started
     Start {
         /// The task ID to start
-        task_id: String,
+        task_id: TaskId,
 
         /// Who is claiming this task
         #[arg(long)]
@@ -191,7 +192,7 @@ pub enum TaskCommands {
     /// Mark a task as completed
     Complete {
         /// The task ID to complete
-        task_id: String,
+        task_id: TaskId,
 
         /// Summary of what was accomplished
         #[arg(long)]
@@ -213,31 +214,31 @@ pub enum TaskCommands {
     /// Mark a task as failed
     Fail {
         /// The task ID to fail
-        task_id: String,
+        task_id: TaskId,
     },
 
     /// Retry a failed task
     Retry {
         /// The task ID to retry
-        task_id: String,
+        task_id: TaskId,
     },
 
     /// Release a claimed task back to pending
     Release {
         /// The task ID to release
-        task_id: String,
+        task_id: TaskId,
     },
 
     /// Delete a pending task
     Delete {
         /// The task ID to delete
-        task_id: String,
+        task_id: TaskId,
     },
 
     /// Add a comment to a task
     Comment {
         /// The task ID to comment on
-        task_id: String,
+        task_id: TaskId,
 
         /// The comment text
         text: String,
@@ -249,7 +250,7 @@ pub enum EditCommands {
     /// Edit a goal's description
     Goal {
         /// The goal ID to edit
-        goal_id: String,
+        goal_id: GoalId,
 
         /// New description
         #[arg(long)]
@@ -259,7 +260,7 @@ pub enum EditCommands {
     /// Edit a task's description or contract
     Task {
         /// The task ID to edit
-        task_id: String,
+        task_id: TaskId,
 
         /// New description
         #[arg(long)]
@@ -283,7 +284,7 @@ pub enum EditCommands {
 
         /// Add a blocked-by dependency
         #[arg(long, value_delimiter = ',')]
-        blocked_by: Option<Vec<String>>,
+        blocked_by: Option<Vec<TaskId>>,
     },
 }
 
