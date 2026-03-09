@@ -1,9 +1,10 @@
 use anyhow::{Result, anyhow};
 
 use crate::db::Database;
+use crate::id::{GoalId, TaskId};
 use crate::models::{Contract, Goal, Priority, Task};
 
-pub fn goal(goal_id: &str, description: String, db: &mut Database) -> Result<Goal> {
+pub fn goal(goal_id: &GoalId, description: String, db: &mut Database) -> Result<Goal> {
     let base = db.base_path().to_path_buf();
     let goal = db
         .get_goal_mut(goal_id)
@@ -16,13 +17,13 @@ pub fn goal(goal_id: &str, description: String, db: &mut Database) -> Result<Goa
 
 #[allow(clippy::too_many_arguments)]
 pub fn task(
-    task_id: &str,
+    task_id: &TaskId,
     description: Option<String>,
     priority: Option<Priority>,
     receives: Option<String>,
     produces: Option<String>,
     verify: Option<String>,
-    blocked_by: Option<Vec<String>>,
+    blocked_by: Option<Vec<TaskId>>,
     db: &mut Database,
 ) -> Result<Task> {
     let base = db.base_path().to_path_buf();
