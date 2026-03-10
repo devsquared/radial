@@ -1,31 +1,37 @@
 # Radial
 
-Task orchestration system for LLM agents. Radial provides structure and state management for breaking down large goals into tracked, contract-bound tasks.
+Task orchestration for LLM agents. Break down goals into tracked, contract-bound tasks with clear inputs, outputs, and verification.
 
-## Motivation
+## Table of Contents
 
-Radial was designed to address some early challenges that I ran into when working with LLMs. I noticed I had a lot of success when
-I gave clear verification instructions and tied things back to a main goal. This helped me focus on how to drive the work but also 
-seemed to result in better results. I started early with repeatable prompts that I would reuse and compose into workflows.You can tell 
-that Beads was a heavy influence on Radial. I wanted to understand how Beads worked and that meant building a similar system. 
+- [Highlights](#highlights)
+- [Overview](#overview)
+- [Usage](#usage)
+- [Installation](#installation)
+- [Contributing](#contributing)
 
-## Why contracts?
+## Highlights
 
-For me, building something has always been anchored with a main goal. You may slice goals into smaller tasks, but it is always important
-to have a contract that defines the expected outcome and how that pushes the work forward towards the goal. I took this idea and applied
-it early with agentic workflows. 
+- **Contract-driven tasks** — every task defines what it receives, what it produces, and how to verify success
+- **Dependency tracking** — tasks can block on others, with automatic cycle detection
+- **Multi-agent coordination** — atomic task claiming prevents conflicts when multiple agents work in parallel
+- **Git-friendly persistence** — state lives in `.radial/` as TOML files, easy to commit and diff
+- **Stealth mode** — keep `.radial/` out of version control with `rd init --stealth`
+- **Shared state** — multiple checkouts can share a radial database via redirect files
+- **JSON output** — every command supports `--json` for machine-readable output
+- **Task-driven memory** — goals and tasks persist across sessions, giving agents durable context for long-running workflows
+- **Agent onboarding** — `rd prep` outputs a usage guide you can drop straight into a prompt
 
-Radial tracks what you have, what you must produce, and how we know it worked.
+## Overview
 
-This design helps agents with clear boundaries, verifiable completion, and better handoffs. The contract is also designed to be flexible,
-adaptable, and small.
+Radial is a CLI tool that brings structure to agentic workflows. Instead of handing an LLM a vague goal, you break work into tasks with contracts: what goes in, what comes out, and how to check it worked. This gives agents clear boundaries, verifiable completion criteria, and better handoffs between steps.
 
-## Install
+I built Radial after noticing that LLM agents produce significantly better results when given explicit verification instructions tied back to a main goal. Inspired by [Beads](https://github.com/steveyegge/beads), Radial takes contracts as its core primitive.
 
-Currently, the best install path is a build from source. Clone the repository and utilize cargo to build the project.
+## Usage
 
+### Quick start
 
-## Quick Start
 ```bash
 # Initialize in your project
 rd init
@@ -46,16 +52,23 @@ rd task create <goal-id> "Add users endpoint" \
   --blocked-by <previous-task-id>
 ```
 
-Then use a prompt such as the following with your agent of choice (Make sure to replace <goal-id> with the actual ID):
+### Letting agents drive
+
+If you want an agent to handle the full workflow on its own, tell it to use `rd` as its task management system.
+Tell the agent to run `rd prep` to prepare the agent. It gives the agent everything it needs to discover goals, 
+pick tasks, and complete work autonomously.
+
+For a more hands-on approach, you can write your own prompt. Here's an example (replace `<goal-id>` with the actual ID):
+
 ```
 You are a senior developer implementing a basic REST API.
 
-Use rd to coordinate. Run rd ready <goal-id> to see available tasks. Pick one, run rd task start <task-id>, do the work, then 
-run rd task complete <task-id> --result '<summary>'. Check rd ready again for more work. Stop when nothing is ready. If a task 
-start fails because another agent claimed it, pick a different ready task.
+Use rd to coordinate. Run rd ready <goal-id> to see available tasks. Pick one, run rd task start <task-id>,
+do the work, then run rd task complete <task-id> --result '<summary>'. Check rd ready again for more work.
+Stop when nothing is ready. If a task start fails because another agent claimed it, pick a different ready task.
 ```
 
-## Commands
+### Commands
 
 | Command | Description |
 |---------|-------------|
@@ -69,13 +82,17 @@ start fails because another agent claimed it, pick a different ready task.
 | `rd task fail <task-id>` | Mark task as failed |
 | `rd task retry <task-id>` | Retry a failed task |
 | `rd task comment <task-id> <text>` | Add a comment to a task |
+| `rd task release <task-id>` | Release a claimed task |
 | `rd ready <goal-id>` | List tasks ready to start |
 | `rd status [--goal <id>] [--task <id>] [--concise]` | Show status |
+| `rd compact analyze` | Find tasks eligible for compaction |
+| `rd compact apply <task-id> --summary <text>` | Compact a completed task |
+| `rd clean` | Remove completed goals |
 | `rd prep` | Output preparation guide for LLM agents |
 
 All commands accept `--json` for machine-readable output.
 
-## Contracts
+### Contracts
 
 A contract has three parts:
 
@@ -83,7 +100,7 @@ A contract has three parts:
 - **produces** — what this task must output
 - **verify** — how to confirm success (command to run, condition to check)
 
-Contracts are optional at task creation but required before a task can start. This lets you sketch out tasks first, then fill in details.
+Contracts are optional at creation but required before a task can start:
 
 ```bash
 # Create task without contract
@@ -96,43 +113,34 @@ rd task contract <task-id> \
   --verify "psql -c 'SELECT * FROM users' succeeds"
 ```
 
-## Project structure
+### Project structure
 
-Radial stores state in `.radial/` as JSONL files (one JSON object per line). This format is human-readable and git-friendly. It walks up parent directories to find this, so commands work from subdirectories.
+Radial stores state in `.radial/` as TOML files. It walks up parent directories to find this, so commands work from subdirectories.
 
 ```
 your-project/
 ├── .radial/
-│   ├── goals.jsonl
-│   └── tasks.jsonl
+│   ├── goals/
+│   └── tasks/
 ├── src/
 └── ...
 ```
 
-### Stealth mode
+## Installation
 
-Don't want to commit `.radial/`? Use stealth mode:
-
-```bash
-rd init --stealth
-```
-
-This adds `.radial/` to `.git/info/exclude` (local gitignore).
-
-### Shared state
-
-Multiple checkouts can share a radial database:
+Build from source with Cargo:
 
 ```bash
-# In your checkout
-echo "/path/to/shared/.radial" > .radial/redirect
+git clone https://github.com/devsquared/radial
+cd radial
+cargo install --path .
 ```
 
-Radial will follow the redirect to the shared database.
+This places the `rd` binary in your Cargo bin directory.
 
-## Acknowledgments
+## Contributing
 
-Inspired by [Beads](https://github.com/anthropics/beads), with a focus on contracts as the core primitive.
+Contributions are welcome! See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines on building, testing, and submitting changes.
 
 ## License
 
