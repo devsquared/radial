@@ -3,7 +3,7 @@ use std::fs::{self, File};
 use std::io::Write;
 use std::path::{Path, PathBuf};
 
-use anyhow::{Context, Result, bail};
+use anyhow::{Context, Result, anyhow, bail};
 use fs2::FileExt;
 
 use crate::id::{GoalId, TaskId};
@@ -199,6 +199,54 @@ impl Database {
         self.tasks.get_mut(id)
     }
 
+    pub fn list_subtasks(&self, parent_id: &TaskId) -> Vec<&Task> {
+        let mut subtasks: Vec<&Task> = self
+            .tasks
+            .values()
+            .filter(|t| t.parent_id() == Some(parent_id))
+            .collect();
+        subtasks.sort_by_key(|t| t.created_at());
+        subtasks
+    }
+
+    pub fn has_subtasks(&self, task_id: &TaskId) -> bool {
+        self.tasks.values().any(|t| t.parent_id() == Some(task_id))
+    }
+
+    /// Derive the parent task's state from its subtasks and persist if changed.
+    /// Returns the derived state if the parent was updated, None if unchanged or no subtasks.
+    pub fn sync_parent_state(
+        &mut self,
+        parent_id: &TaskId,
+        base: &Path,
+    ) -> Result<Option<TaskState>> {
+        let subtask_states: Vec<TaskState> = self
+            .list_subtasks(parent_id)
+            .iter()
+            .map(|t| t.state())
+            .collect();
+
+        if subtask_states.is_empty() {
+            return Ok(None);
+        }
+
+        let derived = derive_parent_state(&subtask_states);
+
+        let parent = self
+            .tasks
+            .get_mut(parent_id)
+            .ok_or_else(|| anyhow!("Parent task not found: {parent_id}"))?;
+
+        if parent.state() == derived {
+            return Ok(None);
+        }
+
+        parent.set_derived_state(derived);
+        parent.write_file(base)?;
+
+        Ok(Some(derived))
+    }
+
     pub fn list_tasks(&self, goal_id: &GoalId) -> Vec<&Task> {
         let mut tasks: Vec<&Task> = self
             .tasks
@@ -243,6 +291,24 @@ impl Database {
     }
 }
 
+/// Derive the aggregate state of a parent task from its subtasks' states.
+fn derive_parent_state(subtask_states: &[TaskState]) -> TaskState {
+    if subtask_states.iter().all(|s| *s == TaskState::Completed) {
+        return TaskState::Completed;
+    }
+    let any_active = subtask_states
+        .iter()
+        .any(|s| matches!(s, TaskState::InProgress | TaskState::Verifying));
+    let any_completed = subtask_states.contains(&TaskState::Completed);
+    if any_active || any_completed {
+        return TaskState::InProgress;
+    }
+    if subtask_states.contains(&TaskState::Failed) {
+        return TaskState::Failed;
+    }
+    TaskState::Pending
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -264,7 +330,6 @@ mod tests {
         let now = Timestamp::now();
         Goal::new(
             goal_id(id),
-            None,
             "test goal".to_string(),
             GoalState::Pending,
             now,
@@ -279,6 +344,7 @@ mod tests {
         Task::new(
             task_id(id),
             goal_id(gid),
+            None,
             "test task".to_string(),
             Priority::default(),
             None,
@@ -410,7 +476,6 @@ mod tests {
         let ts2 = Timestamp::from_millisecond(2_000_000).unwrap();
         let g1 = Goal::new(
             goal_id("g1"),
-            None,
             "test goal".to_string(),
             GoalState::Pending,
             ts1,
@@ -420,7 +485,6 @@ mod tests {
         );
         let g2 = Goal::new(
             goal_id("g2"),
-            None,
             "test goal".to_string(),
             GoalState::Pending,
             ts2,
@@ -502,6 +566,7 @@ mod tests {
         let t1 = Task::new(
             task_id("t1"),
             goal_id("g1"),
+            None,
             "test task".to_string(),
             Priority::default(),
             None,
@@ -513,6 +578,7 @@ mod tests {
         let t2 = Task::new(
             task_id("t2"),
             goal_id("g1"),
+            None,
             "test task".to_string(),
             Priority::default(),
             None,

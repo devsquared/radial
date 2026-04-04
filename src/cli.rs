@@ -136,6 +136,10 @@ pub enum TaskCommands {
         #[arg(long)]
         priority: Option<Priority>,
 
+        /// Parent task ID (creates this task as a subtask)
+        #[arg(long)]
+        parent: Option<TaskId>,
+
         /// What this task receives (contract)
         #[arg(long)]
         receives: Option<String>,

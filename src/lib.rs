@@ -89,6 +89,7 @@ fn run_task(task_cmd: TaskCommands, db: &mut Database) -> Result<()> {
             goal_id,
             description,
             priority,
+            parent,
             receives,
             produces,
             verify,
@@ -100,6 +101,7 @@ fn run_task(task_cmd: TaskCommands, db: &mut Database) -> Result<()> {
                 &goal_id,
                 description,
                 prio,
+                parent,
                 receives,
                 produces,
                 verify,
@@ -251,11 +253,11 @@ pub fn run(cli: Cli) -> Result<()> {
             json,
         } => {
             let db = ensure_initialized()?;
-            let tasks = commands::ready::run(&goal_id, priority.as_ref(), &db)?;
+            let ready = commands::ready::run(&goal_id, priority.as_ref(), &db)?;
             let goal = db
                 .get_goal(&goal_id)
                 .ok_or_else(|| anyhow!("Goal not found: {goal_id}"))?;
-            output::ready_tasks(&tasks, goal, json)
+            output::ready_tasks(&ready, goal, json)
         }
         Commands::Prep => {
             let db = ensure_initialized()?;

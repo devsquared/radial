@@ -71,6 +71,8 @@ impl TaskMetrics {
 pub struct Task {
     id: TaskId,
     goal_id: GoalId,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    parent_id: Option<TaskId>,
     description: String,
     #[serde(default)]
     priority: Priority,
@@ -103,6 +105,7 @@ impl Task {
     pub fn new(
         id: TaskId,
         goal_id: GoalId,
+        parent_id: Option<TaskId>,
         description: String,
         priority: Priority,
         contract: Option<Contract>,
@@ -114,6 +117,7 @@ impl Task {
         Self {
             id,
             goal_id,
+            parent_id,
             description,
             priority,
             contract,
@@ -144,6 +148,10 @@ impl Task {
 
     pub fn goal_id(&self) -> &GoalId {
         &self.goal_id
+    }
+
+    pub fn parent_id(&self) -> Option<&TaskId> {
+        self.parent_id.as_ref()
     }
 
     pub fn description(&self) -> &str {
@@ -214,6 +222,16 @@ impl Task {
         self.comments = Vec::new();
         self.updated_at = Timestamp::now();
         true
+    }
+
+    /// Set state directly for parent tasks whose state is derived from subtasks.
+    pub fn set_derived_state(&mut self, state: TaskState) {
+        self.state = state;
+        let now = Timestamp::now();
+        self.updated_at = now;
+        if state == TaskState::Completed && self.completed_at.is_none() {
+            self.completed_at = Some(now);
+        }
     }
 
     pub fn set_description(&mut self, description: String) {
@@ -350,6 +368,10 @@ impl Render for Task {
 
         writeln!(w, "  {}", &self.description)?;
 
+        if let Some(parent_id) = &self.parent_id {
+            writeln!(w, "  Parent: {parent_id}")?;
+        }
+
         if let Some(assignee) = &self.assignee {
             writeln!(w, "  Assignee: {assignee}")?;
         }
@@ -394,6 +416,7 @@ mod tests {
         Task {
             id: TaskId::from("t_abc123".to_string()),
             goal_id: GoalId::from("g_xyz789".to_string()),
+            parent_id: None,
             description: "test task".to_string(),
             priority: Priority::default(),
             contract: None,

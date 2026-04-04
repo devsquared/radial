@@ -98,8 +98,6 @@ impl Render for Metrics {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Goal {
     id: GoalId,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    parent_id: Option<GoalId>,
     description: String,
     state: GoalState,
     created_at: Timestamp,
@@ -110,10 +108,8 @@ pub struct Goal {
 }
 
 impl Goal {
-    #[allow(clippy::too_many_arguments)]
     pub fn new(
         id: GoalId,
-        parent_id: Option<GoalId>,
         description: String,
         state: GoalState,
         created_at: Timestamp,
@@ -123,7 +119,6 @@ impl Goal {
     ) -> Self {
         Self {
             id,
-            parent_id,
             description,
             state,
             created_at,
@@ -135,10 +130,6 @@ impl Goal {
 
     pub fn id(&self) -> &GoalId {
         &self.id
-    }
-
-    pub fn parent_id(&self) -> Option<&GoalId> {
-        self.parent_id.as_ref()
     }
 
     pub fn description(&self) -> &str {

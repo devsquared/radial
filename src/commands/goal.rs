@@ -9,7 +9,6 @@ pub fn create(description: String, db: &mut Database) -> Result<Goal> {
     let now = Timestamp::now();
     let goal = Goal::new(
         GoalId::new(),
-        None,
         description,
         GoalState::Pending,
         now,

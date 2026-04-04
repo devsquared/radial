@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::io::{self, Write};
 
 use anyhow::Result;
@@ -9,6 +10,7 @@ use crate::commands::list::GoalWithTasks;
 use crate::commands::show::ShowResult;
 use crate::commands::status::{GoalSummary, StatusResult};
 use crate::commands::task::CompleteResult;
+use crate::id::TaskId;
 use crate::models::{Goal, Task};
 
 /// Trait for types that can render themselves as human-readable CLI output.
@@ -160,7 +162,10 @@ pub fn task_list(tasks: &[Task], goal: &Goal, verbose: bool, json: bool) -> Resu
             style("ASSIGNEE").bold().underlined(),
             style("DESCRIPTION").bold().underlined(),
         )?;
-        for task in tasks {
+
+        let subtask_map = build_subtask_map(tasks);
+
+        for task in tasks.iter().filter(|t| t.parent_id().is_none()) {
             writeln!(
                 w,
                 "{:<10} {:<13} {:<10} {:<12} {}",
@@ -178,6 +183,29 @@ pub fn task_list(tasks: &[Task], goal: &Goal, verbose: bool, json: bool) -> Resu
                         style(comment.created_at()).dim(),
                         truncate(comment.text(), 60),
                     )?;
+                }
+            }
+            if let Some(subtasks) = subtask_map.get(task.id()) {
+                for subtask in subtasks {
+                    writeln!(
+                        w,
+                        "  {:<8} {:<13} {:<10} {:<12} {}",
+                        style(subtask.id()).cyan(),
+                        state_styled(subtask.state().as_ref()),
+                        subtask.priority().as_ref(),
+                        subtask.assignee().unwrap_or("-"),
+                        truncate(subtask.description(), 78),
+                    )?;
+                    if verbose && !subtask.comments().is_empty() {
+                        for comment in subtask.comments() {
+                            writeln!(
+                                w,
+                                "             {}  {}",
+                                style(comment.created_at()).dim(),
+                                truncate(comment.text(), 58),
+                            )?;
+                        }
+                    }
                 }
             }
         }
@@ -467,6 +495,9 @@ fn show_task(task: &Task, json: bool) -> Result<()> {
         writeln!(w)?;
         field(w, "Priority", task.priority().as_ref())?;
         field(w, "Goal", task.goal_id().as_ref())?;
+        if let Some(parent_id) = task.parent_id() {
+            field(w, "Parent", parent_id.as_ref())?;
+        }
         if let Some(assignee) = task.assignee() {
             field(w, "Assignee", assignee)?;
         }
@@ -616,8 +647,24 @@ fn show_goal(
 
 // -- Ready --
 
-pub fn ready_tasks(tasks: &[Task], goal: &Goal, json: bool) -> Result<()> {
-    json_or(tasks, json, |w| {
+pub fn ready_tasks(tasks: &[(Task, Option<Task>)], goal: &Goal, json: bool) -> Result<()> {
+    #[derive(serde::Serialize)]
+    struct ReadyTaskJson<'a> {
+        #[serde(flatten)]
+        task: &'a Task,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        parent: Option<&'a Task>,
+    }
+
+    let task_refs: Vec<ReadyTaskJson> = tasks
+        .iter()
+        .map(|(t, p)| ReadyTaskJson {
+            task: t,
+            parent: p.as_ref(),
+        })
+        .collect();
+
+    json_or(&task_refs, json, |w| {
         writeln!(
             w,
             "Ready tasks for {} [{}]",
@@ -631,21 +678,30 @@ pub fn ready_tasks(tasks: &[Task], goal: &Goal, json: bool) -> Result<()> {
             return Ok(());
         }
 
-        writeln!(
-            w,
-            "{:<10} {:<10} {}",
-            style("ID").bold().underlined(),
-            style("PRIORITY").bold().underlined(),
-            style("DESCRIPTION").bold().underlined(),
-        )?;
-        for task in tasks {
+        for (task, parent) in tasks {
             writeln!(
                 w,
-                "{:<10} {:<10} {}",
-                style(task.id()).cyan(),
+                "{} [{}]",
+                style(task.id()).cyan().bold(),
                 task.priority().as_ref(),
-                truncate(task.description(), 80),
             )?;
+            writeln!(w, "  {}", task.description())?;
+            if let Some(p) = parent {
+                writeln!(
+                    w,
+                    "  {} {} — {}",
+                    style("Parent:").dim(),
+                    style(p.id()).cyan(),
+                    truncate(p.description(), 60),
+                )?;
+            }
+            if let Some(contract) = task.contract() {
+                writeln!(w, "  Contract:")?;
+                writeln!(w, "    Receives: {}", contract.receives())?;
+                writeln!(w, "    Produces: {}", contract.produces())?;
+                writeln!(w, "    Verify:   {}", contract.verify())?;
+            }
+            writeln!(w)?;
         }
         Ok(())
     })
@@ -694,7 +750,8 @@ pub fn list(results: &[GoalWithTasks], json: bool) -> Result<()> {
 
             if !r.tasks.is_empty() {
                 writeln!(w)?;
-                for task in &r.tasks {
+                let subtask_map = build_subtask_map(&r.tasks);
+                for task in r.tasks.iter().filter(|t| t.parent_id().is_none()) {
                     writeln!(
                         w,
                         "  {:<10} {:<13} {:<10} {:<12} {}",
@@ -704,6 +761,19 @@ pub fn list(results: &[GoalWithTasks], json: bool) -> Result<()> {
                         task.assignee().unwrap_or("-"),
                         truncate(task.description(), 60),
                     )?;
+                    if let Some(subtasks) = subtask_map.get(task.id()) {
+                        for subtask in subtasks {
+                            writeln!(
+                                w,
+                                "    {:<8} {:<13} {:<10} {:<12} {}",
+                                style(subtask.id()).cyan(),
+                                state_styled(subtask.state().as_ref()),
+                                subtask.priority().as_ref(),
+                                subtask.assignee().unwrap_or("-"),
+                                truncate(subtask.description(), 58),
+                            )?;
+                        }
+                    }
                 }
             }
             writeln!(w)?;
@@ -769,6 +839,17 @@ pub fn compact_apply(task_id: &str) -> Result<()> {
 fn field(w: &mut dyn Write, label: &str, value: &str) -> Result<()> {
     writeln!(w, "{:<14} {}", style(label).dim(), value)?;
     Ok(())
+}
+
+/// Group subtasks by their parent task ID for hierarchical rendering.
+fn build_subtask_map(tasks: &[Task]) -> HashMap<&TaskId, Vec<&Task>> {
+    let mut map: HashMap<&TaskId, Vec<&Task>> = HashMap::new();
+    for task in tasks {
+        if let Some(pid) = task.parent_id() {
+            map.entry(pid).or_default().push(task);
+        }
+    }
+    map
 }
 
 /// Apply color to a state string based on its value.
