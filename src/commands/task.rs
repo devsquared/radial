@@ -585,10 +585,37 @@ pub fn delete(task_id: &TaskId, db: &mut Database) -> Result<Task> {
 
     let task = task.clone();
     let parent_id = task.parent_id().cloned();
-    db.delete_task(task_id, task.goal_id())?;
+    let goal_id = task.goal_id().clone();
+    db.delete_task(task_id, &goal_id)?;
+
+    let base = db.base_path().to_owned();
+
+    // Remove the deleted task ID from any downstream blocked_by lists so those
+    // tasks are not permanently deadlocked waiting on a task that no longer exists.
+    let downstream_ids: Vec<TaskId> = db
+        .list_tasks(&goal_id)
+        .iter()
+        .filter(|t| t.blocked_by().contains(task_id))
+        .map(|t| t.id().clone())
+        .collect();
+
+    for dep_id in &downstream_ids {
+        let dep = db.get_task_mut(dep_id).unwrap();
+        let new_blockers: Vec<TaskId> = dep
+            .blocked_by()
+            .iter()
+            .filter(|id| *id != task_id)
+            .cloned()
+            .collect();
+        let should_unblock = new_blockers.is_empty() && dep.state() == TaskState::Blocked;
+        dep.set_blocked_by(new_blockers);
+        if should_unblock {
+            dep.unblock();
+        }
+        dep.write_file(&base)?;
+    }
 
     if let Some(pid) = parent_id {
-        let base = db.base_path().to_owned();
         db.sync_parent_state(&pid, &base)?;
     }
 
