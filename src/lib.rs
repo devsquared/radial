@@ -145,8 +145,12 @@ fn run_task(task_cmd: TaskCommands, db: &mut Database) -> Result<()> {
                 &RenderOptions::new().json(json).full(full).verbose(verbose),
             )
         }
-        TaskCommands::Start { task_id, assignee } => {
-            let task = commands::task::start(&task_id, &assignee, db)?;
+        TaskCommands::Start {
+            task_id,
+            assignee,
+            force,
+        } => {
+            let task = commands::task::start(&task_id, &assignee, force, db)?;
             output::task_started(&task)
         }
         TaskCommands::Complete {
