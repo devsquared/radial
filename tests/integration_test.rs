@@ -1871,3 +1871,287 @@ fn test_create_task_blocked_by_completed_task_yields_pending() {
         "Task created with only completed blockers must start as pending"
     );
 }
+
+#[test]
+fn test_blocked_by_comma_separated() {
+    let env = TestEnv::new();
+    env.run(&["init"]).expect("Init failed");
+
+    let output = env
+        .run(&["goal", "create", "Comma separated blocked-by test"])
+        .expect("Create goal failed");
+    let goal_id = output
+        .lines()
+        .find(|l| l.contains("Created goal:"))
+        .and_then(|l| l.split_whitespace().nth(2))
+        .unwrap();
+
+    let make_task = |env: &TestEnv, desc: &str| -> String {
+        env.run(&["task", "create", goal_id, desc])
+            .expect("Create task failed")
+            .lines()
+            .find(|l| l.contains("Created task:"))
+            .and_then(|l| l.split_whitespace().nth(2))
+            .unwrap()
+            .to_string()
+    };
+
+    let task_a = make_task(&env, "Task A");
+    let task_b = make_task(&env, "Task B");
+
+    // Pass both IDs as a single comma-separated value
+    let combined = format!("{task_a},{task_b}");
+    let output = env
+        .run(&[
+            "task",
+            "create",
+            goal_id,
+            "Task C",
+            "--blocked-by",
+            &combined,
+        ])
+        .expect("Create task C with comma-separated blocked-by failed");
+
+    let task_c = output
+        .lines()
+        .find(|l| l.contains("Created task:"))
+        .and_then(|l| l.split_whitespace().nth(2))
+        .unwrap()
+        .to_string();
+
+    let show = env
+        .run(&["show", &task_c, "--json"])
+        .expect("Show task C failed");
+    let json: serde_json::Value = serde_json::from_str(&show).expect("Invalid JSON");
+    let blocked_by: Vec<&str> = json["blocked_by"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|v| v.as_str().unwrap())
+        .collect();
+    assert!(
+        blocked_by.contains(&task_a.as_str()),
+        "Task C must be blocked by Task A"
+    );
+    assert!(
+        blocked_by.contains(&task_b.as_str()),
+        "Task C must be blocked by Task B"
+    );
+}
+
+#[test]
+fn test_blocked_by_space_separated_unquoted() {
+    let env = TestEnv::new();
+    env.run(&["init"]).expect("Init failed");
+
+    let output = env
+        .run(&["goal", "create", "Space separated blocked-by test"])
+        .expect("Create goal failed");
+    let goal_id = output
+        .lines()
+        .find(|l| l.contains("Created goal:"))
+        .and_then(|l| l.split_whitespace().nth(2))
+        .unwrap();
+
+    let make_task = |env: &TestEnv, desc: &str| -> String {
+        env.run(&["task", "create", goal_id, desc])
+            .expect("Create task failed")
+            .lines()
+            .find(|l| l.contains("Created task:"))
+            .and_then(|l| l.split_whitespace().nth(2))
+            .unwrap()
+            .to_string()
+    };
+
+    let task_a = make_task(&env, "Task A");
+    let task_b = make_task(&env, "Task B");
+
+    // Pass both IDs as separate arguments (unquoted space-separated)
+    let output = env
+        .run(&[
+            "task",
+            "create",
+            goal_id,
+            "Task C",
+            "--blocked-by",
+            &task_a,
+            &task_b,
+        ])
+        .expect("Create task C with space-separated blocked-by failed");
+
+    let task_c = output
+        .lines()
+        .find(|l| l.contains("Created task:"))
+        .and_then(|l| l.split_whitespace().nth(2))
+        .unwrap()
+        .to_string();
+
+    let show = env
+        .run(&["show", &task_c, "--json"])
+        .expect("Show task C failed");
+    let json: serde_json::Value = serde_json::from_str(&show).expect("Invalid JSON");
+    let blocked_by: Vec<&str> = json["blocked_by"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|v| v.as_str().unwrap())
+        .collect();
+    assert!(
+        blocked_by.contains(&task_a.as_str()),
+        "Task C must be blocked by Task A"
+    );
+    assert!(
+        blocked_by.contains(&task_b.as_str()),
+        "Task C must be blocked by Task B"
+    );
+}
+
+#[test]
+fn test_blocked_by_mixed_comma_and_space() {
+    let env = TestEnv::new();
+    env.run(&["init"]).expect("Init failed");
+
+    let output = env
+        .run(&["goal", "create", "Mixed comma/space blocked-by test"])
+        .expect("Create goal failed");
+    let goal_id = output
+        .lines()
+        .find(|l| l.contains("Created goal:"))
+        .and_then(|l| l.split_whitespace().nth(2))
+        .unwrap();
+
+    let make_task = |env: &TestEnv, desc: &str| -> String {
+        env.run(&["task", "create", goal_id, desc])
+            .expect("Create task failed")
+            .lines()
+            .find(|l| l.contains("Created task:"))
+            .and_then(|l| l.split_whitespace().nth(2))
+            .unwrap()
+            .to_string()
+    };
+
+    let task_a = make_task(&env, "Task A");
+    let task_b = make_task(&env, "Task B");
+    let task_c = make_task(&env, "Task C");
+
+    // Pass two as comma-separated and one as a separate arg
+    let ab = format!("{task_a},{task_b}");
+    let output = env
+        .run(&[
+            "task",
+            "create",
+            goal_id,
+            "Task D",
+            "--blocked-by",
+            &ab,
+            &task_c,
+        ])
+        .expect("Create task D with mixed blocked-by failed");
+
+    let task_d = output
+        .lines()
+        .find(|l| l.contains("Created task:"))
+        .and_then(|l| l.split_whitespace().nth(2))
+        .unwrap()
+        .to_string();
+
+    let show = env
+        .run(&["show", &task_d, "--json"])
+        .expect("Show task D failed");
+    let json: serde_json::Value = serde_json::from_str(&show).expect("Invalid JSON");
+    let blocked_by: Vec<&str> = json["blocked_by"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|v| v.as_str().unwrap())
+        .collect();
+    assert_eq!(blocked_by.len(), 3, "Task D must have exactly 3 blockers");
+    assert!(blocked_by.contains(&task_a.as_str()));
+    assert!(blocked_by.contains(&task_b.as_str()));
+    assert!(blocked_by.contains(&task_c.as_str()));
+}
+
+#[test]
+fn test_list_truncates_descriptions_by_default() {
+    let long_desc = "A".repeat(100);
+    let env = TestEnv::new();
+    env.run(&["init"]).expect("Init failed");
+
+    let output = env
+        .run(&["goal", "create", &long_desc])
+        .expect("Create goal failed");
+    let goal_id = output
+        .lines()
+        .find(|l| l.contains("Created goal:"))
+        .and_then(|l| l.split_whitespace().nth(2))
+        .unwrap();
+
+    env.run(&["task", "create", goal_id, &long_desc])
+        .expect("Create task failed");
+
+    let list_output = env.run(&["list"]).expect("List failed");
+    assert!(
+        !list_output.contains(&long_desc),
+        "rd list must truncate long descriptions by default"
+    );
+}
+
+#[test]
+fn test_list_full_shows_complete_descriptions() {
+    let long_desc = "A".repeat(100);
+    let env = TestEnv::new();
+    env.run(&["init"]).expect("Init failed");
+
+    let output = env
+        .run(&["goal", "create", &long_desc])
+        .expect("Create goal failed");
+    let goal_id = output
+        .lines()
+        .find(|l| l.contains("Created goal:"))
+        .and_then(|l| l.split_whitespace().nth(2))
+        .unwrap();
+
+    env.run(&["task", "create", goal_id, &long_desc])
+        .expect("Create task failed");
+
+    let full_output = env.run(&["list", "--full"]).expect("List --full failed");
+    assert!(
+        full_output.contains(&long_desc),
+        "rd list --full must show complete descriptions"
+    );
+}
+
+#[test]
+fn test_task_list_full_shows_complete_descriptions() {
+    let long_desc = "B".repeat(100);
+    let env = TestEnv::new();
+    env.run(&["init"]).expect("Init failed");
+
+    let output = env
+        .run(&["goal", "create", "Goal for task list full test"])
+        .expect("Create goal failed");
+    let goal_id = output
+        .lines()
+        .find(|l| l.contains("Created goal:"))
+        .and_then(|l| l.split_whitespace().nth(2))
+        .unwrap();
+
+    env.run(&["task", "create", goal_id, &long_desc])
+        .expect("Create task failed");
+
+    let default_output = env
+        .run(&["task", "list", goal_id])
+        .expect("task list failed");
+    assert!(
+        !default_output.contains(&long_desc),
+        "rd task list must truncate long descriptions by default"
+    );
+
+    let full_output = env
+        .run(&["task", "list", goal_id, "--full"])
+        .expect("task list --full failed");
+    assert!(
+        full_output.contains(&long_desc),
+        "rd task list --full must show complete descriptions"
+    );
+}

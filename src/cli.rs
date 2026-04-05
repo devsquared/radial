@@ -30,6 +30,10 @@ pub enum Commands {
         /// Output as JSON
         #[arg(long)]
         json: bool,
+
+        /// Show full descriptions without truncating
+        #[arg(long)]
+        full: bool,
     },
 
     /// Manage tasks
@@ -152,9 +156,9 @@ pub enum TaskCommands {
         #[arg(long)]
         verify: Option<String>,
 
-        /// IDs of tasks this task is blocked by
-        #[arg(long, value_delimiter = ',')]
-        blocked_by: Option<Vec<TaskId>>,
+        /// IDs of tasks this task is blocked by (comma or space separated)
+        #[arg(long, value_delimiter = ',', num_args = 1..)]
+        blocked_by: Option<Vec<String>>,
 
         /// Output as JSON
         #[arg(long)]
@@ -181,6 +185,10 @@ pub enum TaskCommands {
         /// Filter tasks by assignee
         #[arg(long)]
         assignee: Option<String>,
+
+        /// Show full descriptions without truncating
+        #[arg(long)]
+        full: bool,
     },
 
     /// Mark a task as started
@@ -294,9 +302,9 @@ pub enum EditCommands {
         #[arg(long)]
         verify: Option<String>,
 
-        /// Add a blocked-by dependency
-        #[arg(long, value_delimiter = ',')]
-        blocked_by: Option<Vec<TaskId>>,
+        /// Add a blocked-by dependency (comma or space separated)
+        #[arg(long, value_delimiter = ',', num_args = 1..)]
+        blocked_by: Option<Vec<String>>,
     },
 }
 

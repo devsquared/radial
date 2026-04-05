@@ -14,7 +14,10 @@ pub mod output;
 use anyhow::{Context, Result, anyhow};
 use cli::{Cli, Commands, CompactCommands, EditCommands, GoalCommands, TaskCommands};
 use db::Database;
+use id::TaskId;
+use output::RenderOptions;
 use std::path::PathBuf;
+use std::str::FromStr;
 
 pub const RADIAL_DIR: &str = ".radial";
 pub const REDIRECT_FILE: &str = "redirect";
@@ -63,6 +66,19 @@ fn get_radial_path() -> Option<PathBuf> {
     resolve_radial_dir()
 }
 
+/// Parses a list of raw ID strings (which may themselves be comma- or
+/// whitespace-separated) into `TaskId` values.
+fn parse_blocked_by(raw: Option<Vec<String>>) -> Result<Option<Vec<TaskId>>> {
+    let Some(raw) = raw else { return Ok(None) };
+    let ids: Result<Vec<TaskId>> = raw
+        .iter()
+        .flat_map(|s| s.split([',', ' ', '\t']))
+        .filter(|s| !s.is_empty())
+        .map(|s| TaskId::from_str(s).map_err(|e| anyhow!("{e}")))
+        .collect();
+    Ok(Some(ids?))
+}
+
 fn ensure_initialized() -> Result<Database> {
     let radial_dir = get_radial_path()
         .ok_or_else(|| anyhow!("Radial not initialized. Run 'radial init' first."))?;
@@ -74,11 +90,11 @@ fn run_goal(goal_cmd: GoalCommands, db: &mut Database) -> Result<()> {
     match goal_cmd {
         GoalCommands::Create { description, json } => {
             let goal = commands::goal::create(description, db)?;
-            output::goal_created(&goal, json)
+            output::goal_created(&goal, &RenderOptions::new().json(json))
         }
         GoalCommands::List { json } => {
             let goals = commands::goal::list(db);
-            output::goal_list(&goals, json)
+            output::goal_list(&goals, &RenderOptions::new().json(json))
         }
     }
 }
@@ -105,10 +121,10 @@ fn run_task(task_cmd: TaskCommands, db: &mut Database) -> Result<()> {
                 receives,
                 produces,
                 verify,
-                blocked_by,
+                parse_blocked_by(blocked_by)?,
                 db,
             )?;
-            output::task_created(&task, json)
+            output::task_created(&task, &RenderOptions::new().json(json))
         }
         TaskCommands::List {
             goal_id,
@@ -116,12 +132,17 @@ fn run_task(task_cmd: TaskCommands, db: &mut Database) -> Result<()> {
             json,
             verbose,
             assignee,
+            full,
         } => {
             let tasks = commands::task::list(&goal_id, priority.as_ref(), assignee.as_deref(), db)?;
             let goal = db
                 .get_goal(&goal_id)
                 .ok_or_else(|| anyhow!("Goal not found: {goal_id}"))?;
-            output::task_list(&tasks, goal, verbose, json)
+            output::task_list(
+                &tasks,
+                goal,
+                &RenderOptions::new().json(json).full(full).verbose(verbose),
+            )
         }
         TaskCommands::Start { task_id, assignee } => {
             let task = commands::task::start(&task_id, &assignee, db)?;
@@ -174,7 +195,7 @@ fn run_task(task_cmd: TaskCommands, db: &mut Database) -> Result<()> {
         }
         TaskCommands::Comment { task_id, text } => {
             let task = commands::task::comment(&task_id, text, db)?;
-            output::task_commented(&task, false)
+            output::task_commented(&task, &RenderOptions::new())
         }
     }
 }
@@ -186,10 +207,10 @@ pub fn run(cli: Cli) -> Result<()> {
             let mut db = ensure_initialized()?;
             run_goal(goal_cmd, &mut db)
         }
-        Commands::List { json } => {
+        Commands::List { json, full } => {
             let db = ensure_initialized()?;
             let results = commands::list::run(&db)?;
-            output::list(&results, json)
+            output::list(&results, &RenderOptions::new().json(json).full(full))
         }
         Commands::Task(task_cmd) => {
             let mut db = ensure_initialized()?;
@@ -221,7 +242,7 @@ pub fn run(cli: Cli) -> Result<()> {
                         receives,
                         produces,
                         verify,
-                        blocked_by,
+                        parse_blocked_by(blocked_by)?,
                         &mut db,
                     )?;
                     output::task_edited(&task)
@@ -236,12 +257,12 @@ pub fn run(cli: Cli) -> Result<()> {
         } => {
             let db = ensure_initialized()?;
             let result = commands::status::run(goal, task, assignee, &db)?;
-            output::status(&result, json)
+            output::status(&result, &RenderOptions::new().json(json))
         }
         Commands::Show { id, json } => {
             let db = ensure_initialized()?;
             let result = commands::show::run(&id, &db)?;
-            output::show(&result, json)
+            output::show(&result, &RenderOptions::new().json(json))
         }
         Commands::Clean { all, force } => {
             let mut db = ensure_initialized()?;
@@ -257,7 +278,7 @@ pub fn run(cli: Cli) -> Result<()> {
             let goal = db
                 .get_goal(&goal_id)
                 .ok_or_else(|| anyhow!("Goal not found: {goal_id}"))?;
-            output::ready_tasks(&ready, goal, json)
+            output::ready_tasks(&ready, goal, &RenderOptions::new().json(json))
         }
         Commands::Prep => {
             let db = ensure_initialized()?;
@@ -269,7 +290,7 @@ pub fn run(cli: Cli) -> Result<()> {
             match compact_cmd {
                 CompactCommands::Analyze { goal, json } => {
                     let candidates = commands::compact::analyze(goal.as_deref(), &db)?;
-                    output::compact_analyze(&candidates, json)
+                    output::compact_analyze(&candidates, &RenderOptions::new().json(json))
                 }
                 CompactCommands::Apply { task_id, summary } => {
                     let id = commands::compact::apply(&task_id, summary, &mut db)?;
