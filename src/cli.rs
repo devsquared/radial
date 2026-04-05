@@ -263,6 +263,12 @@ pub enum TaskCommands {
         /// The comment text
         text: String,
     },
+
+    /// View all comments on a task
+    Comments {
+        /// The task ID to view comments for
+        task_id: TaskId,
+    },
 }
 
 #[derive(Subcommand)]
