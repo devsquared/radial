@@ -99,6 +99,7 @@ fn run_goal(goal_cmd: GoalCommands, db: &mut Database) -> Result<()> {
     }
 }
 
+#[allow(clippy::too_many_lines)]
 fn run_task(task_cmd: TaskCommands, db: &mut Database) -> Result<()> {
     match task_cmd {
         TaskCommands::Create {
@@ -196,6 +197,10 @@ fn run_task(task_cmd: TaskCommands, db: &mut Database) -> Result<()> {
         TaskCommands::Comment { task_id, text } => {
             let task = commands::task::comment(&task_id, text, db)?;
             output::task_commented(&task, &RenderOptions::new())
+        }
+        TaskCommands::Comments { task_id } => {
+            let task = commands::task::comments(&task_id, db)?;
+            output::task_comments(&task, &RenderOptions::new())
         }
     }
 }

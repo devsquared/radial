@@ -634,6 +634,12 @@ pub fn delete(task_id: &TaskId, db: &mut Database) -> Result<Task> {
     Ok(task)
 }
 
+pub fn comments(task_id: &TaskId, db: &Database) -> Result<Task> {
+    db.get_task(task_id)
+        .ok_or_else(|| task_not_found_err(task_id, db))
+        .cloned()
+}
+
 pub fn comment(task_id: &TaskId, text: String, db: &mut Database) -> Result<Task> {
     if db.get_task(task_id).is_none() {
         return Err(task_not_found_err(task_id, db));

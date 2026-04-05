@@ -2155,3 +2155,121 @@ fn test_task_list_full_shows_complete_descriptions() {
         "rd task list --full must show complete descriptions"
     );
 }
+
+fn create_task_with_contract(env: &TestEnv, goal_id: &str, description: &str) -> String {
+    let output = env
+        .run(&[
+            "task",
+            "create",
+            goal_id,
+            description,
+            "--receives",
+            "input",
+            "--produces",
+            "output",
+            "--verify",
+            "check",
+        ])
+        .expect("Create task failed");
+    output
+        .lines()
+        .find(|l| l.contains("Created task:"))
+        .and_then(|l| l.split_whitespace().nth(2))
+        .unwrap()
+        .to_owned()
+}
+
+#[test]
+fn test_task_comments_no_comments() {
+    let env = TestEnv::new();
+    env.run(&["init"]).expect("Init failed");
+
+    let output = env
+        .run(&["goal", "create", "Comments test goal"])
+        .expect("Create goal failed");
+    let goal_id = output
+        .lines()
+        .find(|l| l.contains("Created goal:"))
+        .and_then(|l| l.split_whitespace().nth(2))
+        .unwrap();
+
+    let task_id = create_task_with_contract(&env, goal_id, "Task with no comments");
+
+    let output = env
+        .run(&["task", "comments", &task_id])
+        .expect("task comments failed");
+    assert!(output.contains(&task_id));
+    assert!(output.contains("0 total"));
+    assert!(output.contains("No comments"));
+}
+
+#[test]
+fn test_task_comments_one_comment() {
+    let env = TestEnv::new();
+    env.run(&["init"]).expect("Init failed");
+
+    let output = env
+        .run(&["goal", "create", "Comments test goal"])
+        .expect("Create goal failed");
+    let goal_id = output
+        .lines()
+        .find(|l| l.contains("Created goal:"))
+        .and_then(|l| l.split_whitespace().nth(2))
+        .unwrap();
+
+    let task_id = create_task_with_contract(&env, goal_id, "Task with one comment");
+
+    env.run(&["task", "comment", &task_id, "Single comment text"])
+        .expect("Add comment failed");
+
+    let output = env
+        .run(&["task", "comments", &task_id])
+        .expect("task comments failed");
+    assert!(output.contains(&task_id));
+    assert!(output.contains("1 total"));
+    assert!(output.contains("Single comment text"));
+}
+
+#[test]
+fn test_task_comments_multiple_comments() {
+    let env = TestEnv::new();
+    env.run(&["init"]).expect("Init failed");
+
+    let output = env
+        .run(&["goal", "create", "Comments test goal"])
+        .expect("Create goal failed");
+    let goal_id = output
+        .lines()
+        .find(|l| l.contains("Created goal:"))
+        .and_then(|l| l.split_whitespace().nth(2))
+        .unwrap();
+
+    let task_id = create_task_with_contract(&env, goal_id, "Task with multiple comments");
+
+    env.run(&["task", "comment", &task_id, "First comment"])
+        .expect("Add first comment failed");
+    env.run(&["task", "comment", &task_id, "Second comment"])
+        .expect("Add second comment failed");
+    env.run(&["task", "comment", &task_id, "Third comment"])
+        .expect("Add third comment failed");
+
+    let output = env
+        .run(&["task", "comments", &task_id])
+        .expect("task comments failed");
+    assert!(output.contains(&task_id));
+    assert!(output.contains("3 total"));
+    assert!(output.contains("First comment"));
+    assert!(output.contains("Second comment"));
+    assert!(output.contains("Third comment"));
+}
+
+#[test]
+fn test_task_comments_nonexistent_task() {
+    let env = TestEnv::new();
+    env.run(&["init"]).expect("Init failed");
+
+    let err = env
+        .run(&["task", "comments", "nonexistent123"])
+        .expect_err("Expected error for nonexistent task");
+    assert!(err.contains("not found") || err.contains("Task not found"));
+}

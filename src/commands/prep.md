@@ -44,9 +44,12 @@ rd task list <goal_id>
 
 # Filter tasks by priority
 rd task list <goal_id> --priority p0
-rd task list <goal_id> --verbose    # Include comments
+rd task list <goal_id> --verbose    # Include comments (truncated to terminal width)
 rd task list <goal_id> --json       # Output as JSON
 ```
+
+`--verbose` truncates long comments to fit the terminal. If you see a hint that comments were
+truncated, use `rd task comments <task_id>` to read the full text.
 
 ### Task Lifecycle
 
@@ -75,6 +78,12 @@ preserved in order.
 ```bash
 rd task comment <task_id> "Started investigating the auth flow"
 rd task comment <task_id> "Found the issue - missing token validation"
+```
+
+To view all comments for a task in full, without truncation:
+
+```bash
+rd task comments <task_id>
 ```
 
 ### Editing

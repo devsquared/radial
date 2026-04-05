@@ -193,6 +193,7 @@ pub fn task_created(task: &Task, opts: &RenderOptions) -> Result<()> {
     })
 }
 
+#[allow(clippy::too_many_lines)]
 pub fn task_list(tasks: &[Task], goal: &Goal, opts: &RenderOptions) -> Result<()> {
     // ID(10) + STATE(13) + PRIORITY(10) + ASSIGNEE(12) + 4 spaces = 49 prefix cols
     let desc_w = opts.desc_width(49);
@@ -238,12 +239,28 @@ pub fn task_list(tasks: &[Task], goal: &Goal, opts: &RenderOptions) -> Result<()
                 truncate(task.description(), desc_w),
             )?;
             if opts.verbose && !task.comments().is_empty() {
+                let mut truncated = false;
                 for comment in task.comments() {
+                    let text = comment.text();
+                    if text.len() > comment_w {
+                        truncated = true;
+                    }
                     writeln!(
                         w,
                         "           {}  {}",
                         style(comment.created_at()).dim(),
-                        truncate(comment.text(), comment_w),
+                        truncate(text, comment_w),
+                    )?;
+                }
+                if truncated {
+                    writeln!(
+                        w,
+                        "           {}",
+                        style(format!(
+                            "Use 'rd task comments {}' to read full comments",
+                            task.id()
+                        ))
+                        .dim(),
                     )?;
                 }
             }
@@ -259,12 +276,28 @@ pub fn task_list(tasks: &[Task], goal: &Goal, opts: &RenderOptions) -> Result<()
                         truncate(subtask.description(), sub_desc_w),
                     )?;
                     if opts.verbose && !subtask.comments().is_empty() {
+                        let mut truncated = false;
                         for comment in subtask.comments() {
+                            let text = comment.text();
+                            if text.len() > comment_w {
+                                truncated = true;
+                            }
                             writeln!(
                                 w,
                                 "             {}  {}",
                                 style(comment.created_at()).dim(),
-                                truncate(comment.text(), comment_w),
+                                truncate(text, comment_w),
+                            )?;
+                        }
+                        if truncated {
+                            writeln!(
+                                w,
+                                "             {}",
+                                style(format!(
+                                    "Use 'rd task comments {}' to read full comments",
+                                    subtask.id()
+                                ))
+                                .dim(),
                             )?;
                         }
                     }
@@ -393,6 +426,34 @@ pub fn task_deleted(task: &Task) -> Result<()> {
     )?;
     writeln!(w, "  {}", truncate(task.description(), 80))?;
     Ok(())
+}
+
+pub fn task_comments(task: &Task, opts: &RenderOptions) -> Result<()> {
+    json_or(task, opts, |w| {
+        writeln!(
+            w,
+            "Comments for task {} ({} total)",
+            style(task.id()).cyan().bold(),
+            task.comments().len(),
+        )?;
+        if task.comments().is_empty() {
+            writeln!(w)?;
+            writeln!(w, "  {}", style("No comments.").dim())?;
+            return Ok(());
+        }
+        for comment in task.comments() {
+            writeln!(w)?;
+            writeln!(
+                w,
+                "  {}",
+                style(format!("[{}]", comment.created_at())).dim()
+            )?;
+            for line in comment.text().lines() {
+                writeln!(w, "  {line}")?;
+            }
+        }
+        Ok(())
+    })
 }
 
 pub fn task_commented(task: &Task, opts: &RenderOptions) -> Result<()> {
