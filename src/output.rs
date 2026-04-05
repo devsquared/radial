@@ -18,14 +18,68 @@ pub trait Render {
     fn render(&self, w: &mut dyn Write) -> Result<()>;
 }
 
-/// Print as JSON if `json` is true, otherwise call `human` with a writer.
+/// Options that control how output is rendered.
+pub struct RenderOptions {
+    pub json: bool,
+    pub full: bool,
+    pub verbose: bool,
+    term_width: u16,
+}
+
+impl Default for RenderOptions {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl RenderOptions {
+    pub fn new() -> Self {
+        let term_width = console::Term::stdout().size().1;
+        Self {
+            json: false,
+            full: false,
+            verbose: false,
+            term_width,
+        }
+    }
+
+    #[must_use]
+    pub fn json(mut self, json: bool) -> Self {
+        self.json = json;
+        self
+    }
+
+    #[must_use]
+    pub fn full(mut self, full: bool) -> Self {
+        self.full = full;
+        self
+    }
+
+    #[must_use]
+    pub fn verbose(mut self, verbose: bool) -> Self {
+        self.verbose = verbose;
+        self
+    }
+
+    /// Max chars available for a description column once `prefix_cols` fixed
+    /// columns are accounted for. Returns `usize::MAX` when `--full` is set.
+    fn desc_width(&self, prefix_cols: u16) -> usize {
+        if self.full {
+            usize::MAX
+        } else {
+            self.term_width.saturating_sub(prefix_cols).max(20) as usize
+        }
+    }
+}
+
+/// Print as JSON if `opts.json` is true, otherwise call `human` with a writer.
 fn json_or<T: Serialize + ?Sized>(
     value: &T,
-    json: bool,
+    opts: &RenderOptions,
     human: impl FnOnce(&mut dyn Write) -> Result<()>,
 ) -> Result<()> {
     let mut stdout = io::stdout().lock();
-    if json {
+    if opts.json {
         serde_json::to_writer_pretty(&mut stdout, value)?;
         writeln!(stdout)?;
     } else {
@@ -46,8 +100,8 @@ fn truncate(s: &str, max: usize) -> String {
 
 // -- Goal outputs --
 
-pub fn goal_created(goal: &Goal, json: bool) -> Result<()> {
-    json_or(goal, json, |w| {
+pub fn goal_created(goal: &Goal, opts: &RenderOptions) -> Result<()> {
+    json_or(goal, opts, |w| {
         writeln!(
             w,
             "{} {}",
@@ -59,8 +113,10 @@ pub fn goal_created(goal: &Goal, json: bool) -> Result<()> {
     })
 }
 
-pub fn goal_list(goals: &[Goal], json: bool) -> Result<()> {
-    json_or(goals, json, |w| {
+pub fn goal_list(goals: &[Goal], opts: &RenderOptions) -> Result<()> {
+    // ID(10) + space(1) + STATE(13) + space(1) = 25 prefix cols
+    let desc_w = opts.desc_width(25);
+    json_or(goals, opts, |w| {
         if goals.is_empty() {
             writeln!(w, "No goals found.")?;
             return Ok(());
@@ -80,7 +136,7 @@ pub fn goal_list(goals: &[Goal], json: bool) -> Result<()> {
                 "{:<10} {:<13} {}",
                 style(goal.id()).cyan(),
                 state_styled(goal.state().as_ref()),
-                truncate(goal.description(), 80),
+                truncate(goal.description(), desc_w),
             )?;
         }
         Ok(())
@@ -115,8 +171,8 @@ pub fn task_edited(task: &Task) -> Result<()> {
 
 // -- Task outputs --
 
-pub fn task_created(task: &Task, json: bool) -> Result<()> {
-    json_or(task, json, |w| {
+pub fn task_created(task: &Task, opts: &RenderOptions) -> Result<()> {
+    json_or(task, opts, |w| {
         writeln!(
             w,
             "{} {}",
@@ -137,15 +193,21 @@ pub fn task_created(task: &Task, json: bool) -> Result<()> {
     })
 }
 
-pub fn task_list(tasks: &[Task], goal: &Goal, verbose: bool, json: bool) -> Result<()> {
-    json_or(tasks, json, |w| {
+pub fn task_list(tasks: &[Task], goal: &Goal, opts: &RenderOptions) -> Result<()> {
+    // ID(10) + STATE(13) + PRIORITY(10) + ASSIGNEE(12) + 4 spaces = 49 prefix cols
+    let desc_w = opts.desc_width(49);
+    // Subtasks indent 2 extra cols
+    let sub_desc_w = opts.desc_width(51);
+    // Comment lines: 11 spaces + timestamp (~20) + 2 spaces = ~33 prefix cols
+    let comment_w = opts.desc_width(33);
+    json_or(tasks, opts, |w| {
         writeln!(
             w,
             "Tasks for {} [{}]",
             style(goal.id()).cyan().bold(),
             state_styled(goal.state().as_ref()),
         )?;
-        writeln!(w, "  {}", truncate(goal.description(), 80))?;
+        writeln!(w, "  {}", truncate(goal.description(), opts.desc_width(2)))?;
         writeln!(w)?;
 
         if tasks.is_empty() {
@@ -173,15 +235,15 @@ pub fn task_list(tasks: &[Task], goal: &Goal, verbose: bool, json: bool) -> Resu
                 state_styled(task.state().as_ref()),
                 task.priority().as_ref(),
                 task.assignee().unwrap_or("-"),
-                truncate(task.description(), 80),
+                truncate(task.description(), desc_w),
             )?;
-            if verbose && !task.comments().is_empty() {
+            if opts.verbose && !task.comments().is_empty() {
                 for comment in task.comments() {
                     writeln!(
                         w,
                         "           {}  {}",
                         style(comment.created_at()).dim(),
-                        truncate(comment.text(), 60),
+                        truncate(comment.text(), comment_w),
                     )?;
                 }
             }
@@ -194,15 +256,15 @@ pub fn task_list(tasks: &[Task], goal: &Goal, verbose: bool, json: bool) -> Resu
                         state_styled(subtask.state().as_ref()),
                         subtask.priority().as_ref(),
                         subtask.assignee().unwrap_or("-"),
-                        truncate(subtask.description(), 78),
+                        truncate(subtask.description(), sub_desc_w),
                     )?;
-                    if verbose && !subtask.comments().is_empty() {
+                    if opts.verbose && !subtask.comments().is_empty() {
                         for comment in subtask.comments() {
                             writeln!(
                                 w,
                                 "             {}  {}",
                                 style(comment.created_at()).dim(),
-                                truncate(comment.text(), 58),
+                                truncate(comment.text(), comment_w),
                             )?;
                         }
                     }
@@ -333,8 +395,8 @@ pub fn task_deleted(task: &Task) -> Result<()> {
     Ok(())
 }
 
-pub fn task_commented(task: &Task, json: bool) -> Result<()> {
-    json_or(task, json, |w| {
+pub fn task_commented(task: &Task, opts: &RenderOptions) -> Result<()> {
+    json_or(task, opts, |w| {
         writeln!(
             w,
             "{} {}",
@@ -351,16 +413,17 @@ pub fn task_commented(task: &Task, json: bool) -> Result<()> {
 
 // -- Status outputs (compact) --
 
-pub fn status(result: &StatusResult, json: bool) -> Result<()> {
+pub fn status(result: &StatusResult, opts: &RenderOptions) -> Result<()> {
     match result {
-        StatusResult::Task(task) => status_task(task, json),
-        StatusResult::Goal(goal_status) => status_goal(goal_status, json),
-        StatusResult::AllGoals(summaries) => status_all_goals(summaries, json),
+        StatusResult::Task(task) => status_task(task, opts),
+        StatusResult::Goal(goal_status) => status_goal(goal_status, opts),
+        StatusResult::AllGoals(summaries) => status_all_goals(summaries, opts),
     }
 }
 
-fn status_task(task: &Task, json: bool) -> Result<()> {
-    json_or(task, json, |w| {
+fn status_task(task: &Task, opts: &RenderOptions) -> Result<()> {
+    let desc_w = opts.desc_width(49);
+    json_or(task, opts, |w| {
         writeln!(
             w,
             "{:<10} {:<13} {:<10} {:<12} {}",
@@ -368,14 +431,18 @@ fn status_task(task: &Task, json: bool) -> Result<()> {
             state_styled(task.state().as_ref()),
             task.priority().as_ref(),
             task.assignee().unwrap_or("-"),
-            truncate(task.description(), 80),
+            truncate(task.description(), desc_w),
         )?;
         Ok(())
     })
 }
 
-fn status_goal(goal_status: &crate::commands::status::GoalStatus, json: bool) -> Result<()> {
-    json_or(goal_status, json, |w| {
+fn status_goal(
+    goal_status: &crate::commands::status::GoalStatus,
+    opts: &RenderOptions,
+) -> Result<()> {
+    let desc_w = opts.desc_width(49);
+    json_or(goal_status, opts, |w| {
         let goal = goal_status.goal();
         let metrics = goal_status.metrics();
 
@@ -387,7 +454,7 @@ fn status_goal(goal_status: &crate::commands::status::GoalStatus, json: bool) ->
             metrics.tasks_completed(),
             metrics.task_count(),
         )?;
-        writeln!(w, "  {}", truncate(goal.description(), 80))?;
+        writeln!(w, "  {}", truncate(goal.description(), opts.desc_width(2)))?;
         writeln!(w)?;
 
         if !goal_status.tasks().is_empty() {
@@ -408,7 +475,7 @@ fn status_goal(goal_status: &crate::commands::status::GoalStatus, json: bool) ->
                     state_styled(task.state().as_ref()),
                     task.priority().as_ref(),
                     task.assignee().unwrap_or("-"),
-                    truncate(task.description(), 80),
+                    truncate(task.description(), desc_w),
                 )?;
             }
         }
@@ -416,8 +483,10 @@ fn status_goal(goal_status: &crate::commands::status::GoalStatus, json: bool) ->
     })
 }
 
-fn status_all_goals(summaries: &[GoalSummary], json: bool) -> Result<()> {
-    json_or(summaries, json, |w| {
+fn status_all_goals(summaries: &[GoalSummary], opts: &RenderOptions) -> Result<()> {
+    // ID(10) + STATE(13) + TASKS(7) + 3 spaces = 33 prefix cols
+    let desc_w = opts.desc_width(33);
+    json_or(summaries, opts, |w| {
         if summaries.is_empty() {
             writeln!(w, "No goals found.")?;
             return Ok(());
@@ -440,7 +509,7 @@ fn status_all_goals(summaries: &[GoalSummary], json: bool) -> Result<()> {
                 style(goal.id()).cyan(),
                 state_styled(goal.state().as_ref()),
                 format!("{}/{}", metrics.tasks_completed(), metrics.task_count()),
-                truncate(goal.description(), 80),
+                truncate(goal.description(), desc_w),
             )?;
         }
         Ok(())
@@ -449,19 +518,19 @@ fn status_all_goals(summaries: &[GoalSummary], json: bool) -> Result<()> {
 
 // -- Show outputs (full detail) --
 
-pub fn show(result: &ShowResult, json: bool) -> Result<()> {
+pub fn show(result: &ShowResult, opts: &RenderOptions) -> Result<()> {
     match result {
-        ShowResult::Task(task) => show_task(task, json),
+        ShowResult::Task(task) => show_task(task, opts),
         ShowResult::Goal {
             goal,
             tasks,
             metrics,
-        } => show_goal(goal, tasks, metrics, json),
+        } => show_goal(goal, tasks, metrics, opts),
     }
 }
 
-fn show_task(task: &Task, json: bool) -> Result<()> {
-    json_or(task, json, |w| {
+fn show_task(task: &Task, opts: &RenderOptions) -> Result<()> {
+    json_or(task, opts, |w| {
         writeln!(
             w,
             "Task {}  [{}]",
@@ -569,7 +638,7 @@ fn show_goal(
     goal: &Goal,
     tasks: &[Task],
     metrics: &crate::models::Metrics,
-    json: bool,
+    opts: &RenderOptions,
 ) -> Result<()> {
     // Wrap in a struct for JSON serialization
     #[derive(Serialize)]
@@ -585,7 +654,8 @@ fn show_goal(
         metrics,
     };
 
-    json_or(&detail, json, |w| {
+    let desc_w = opts.desc_width(49);
+    json_or(&detail, opts, |w| {
         writeln!(
             w,
             "Goal {}  [{}]",
@@ -637,7 +707,7 @@ fn show_goal(
                     state_styled(task.state().as_ref()),
                     task.priority().as_ref(),
                     task.assignee().unwrap_or("-"),
-                    truncate(task.description(), 80),
+                    truncate(task.description(), desc_w),
                 )?;
             }
         }
@@ -647,7 +717,11 @@ fn show_goal(
 
 // -- Ready --
 
-pub fn ready_tasks(tasks: &[(Task, Option<Task>)], goal: &Goal, json: bool) -> Result<()> {
+pub fn ready_tasks(
+    tasks: &[(Task, Option<Task>)],
+    goal: &Goal,
+    opts: &RenderOptions,
+) -> Result<()> {
     #[derive(serde::Serialize)]
     struct ReadyTaskJson<'a> {
         #[serde(flatten)]
@@ -664,7 +738,7 @@ pub fn ready_tasks(tasks: &[(Task, Option<Task>)], goal: &Goal, json: bool) -> R
         })
         .collect();
 
-    json_or(&task_refs, json, |w| {
+    json_or(&task_refs, opts, |w| {
         writeln!(
             w,
             "Ready tasks for {} [{}]",
@@ -709,7 +783,7 @@ pub fn ready_tasks(tasks: &[(Task, Option<Task>)], goal: &Goal, json: bool) -> R
 
 // -- List --
 
-pub fn list(results: &[GoalWithTasks], json: bool) -> Result<()> {
+pub fn list(results: &[GoalWithTasks], opts: &RenderOptions) -> Result<()> {
     // For JSON, serialize as an array of goals with nested tasks
     #[derive(Serialize)]
     struct GoalEntry<'a> {
@@ -728,7 +802,12 @@ pub fn list(results: &[GoalWithTasks], json: bool) -> Result<()> {
         })
         .collect();
 
-    json_or(&entries, json, |w| {
+    // 2 indent + ID(10) + STATE(13) + PRIORITY(10) + ASSIGNEE(12) + 4 spaces = 51 prefix cols
+    let task_desc_w = opts.desc_width(51);
+    // Subtasks add 2 more indent cols
+    let sub_desc_w = opts.desc_width(53);
+    let goal_desc_w = opts.desc_width(2);
+    json_or(&entries, opts, |w| {
         if results.is_empty() {
             writeln!(w, "No goals found.")?;
             return Ok(());
@@ -746,7 +825,7 @@ pub fn list(results: &[GoalWithTasks], json: bool) -> Result<()> {
                 metrics.tasks_completed(),
                 metrics.task_count(),
             )?;
-            writeln!(w, "  {}", truncate(goal.description(), 80))?;
+            writeln!(w, "  {}", truncate(goal.description(), goal_desc_w))?;
 
             if !r.tasks.is_empty() {
                 writeln!(w)?;
@@ -759,7 +838,7 @@ pub fn list(results: &[GoalWithTasks], json: bool) -> Result<()> {
                         state_styled(task.state().as_ref()),
                         task.priority().as_ref(),
                         task.assignee().unwrap_or("-"),
-                        truncate(task.description(), 60),
+                        truncate(task.description(), task_desc_w),
                     )?;
                     if let Some(subtasks) = subtask_map.get(task.id()) {
                         for subtask in subtasks {
@@ -770,7 +849,7 @@ pub fn list(results: &[GoalWithTasks], json: bool) -> Result<()> {
                                 state_styled(subtask.state().as_ref()),
                                 subtask.priority().as_ref(),
                                 subtask.assignee().unwrap_or("-"),
-                                truncate(subtask.description(), 58),
+                                truncate(subtask.description(), sub_desc_w),
                             )?;
                         }
                     }
@@ -792,8 +871,9 @@ pub fn prep(text: &str) -> Result<()> {
 
 // -- Compact --
 
-pub fn compact_analyze(candidates: &[CompactCandidate], json: bool) -> Result<()> {
-    json_or(candidates, json, |w| {
+pub fn compact_analyze(candidates: &[CompactCandidate], opts: &RenderOptions) -> Result<()> {
+    let desc_w = opts.desc_width(35);
+    json_or(candidates, opts, |w| {
         if candidates.is_empty() {
             writeln!(w, "No tasks eligible for compaction.")?;
             return Ok(());
@@ -815,7 +895,7 @@ pub fn compact_analyze(candidates: &[CompactCandidate], json: bool) -> Result<()
                 style(&c.id).cyan(),
                 style(&c.goal_id).dim(),
                 state_styled(&c.state),
-                truncate(&c.description, 60),
+                truncate(&c.description, desc_w),
             )?;
         }
         Ok(())
