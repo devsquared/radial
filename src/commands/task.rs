@@ -189,7 +189,7 @@ pub fn list(
     Ok(tasks)
 }
 
-pub fn start(task_id: &TaskId, assignee: &str, db: &mut Database) -> Result<Task> {
+pub fn start(task_id: &TaskId, assignee: &str, force: bool, db: &mut Database) -> Result<Task> {
     let task = db.get_task(task_id);
 
     if task.is_none() {
@@ -211,7 +211,7 @@ pub fn start(task_id: &TaskId, assignee: &str, db: &mut Database) -> Result<Task
         ));
     }
 
-    if task.state() == TaskState::Blocked && !task.blocked_by().is_empty() {
+    if !force && task.state() == TaskState::Blocked && !task.blocked_by().is_empty() {
         let ids: Vec<&str> = task.blocked_by().iter().map(AsRef::as_ref).collect();
         return Err(anyhow!(
             "Task is blocked by: {}\nComplete those tasks first, or use --force to override.",
@@ -219,7 +219,7 @@ pub fn start(task_id: &TaskId, assignee: &str, db: &mut Database) -> Result<Task
         ));
     }
 
-    if task.state() != TaskState::Pending {
+    if task.state() != TaskState::Pending && task.state() != TaskState::Blocked {
         return Err(anyhow!(
             "Task must be in 'pending' state to start. Current state: {}",
             task.state().as_ref()
@@ -230,7 +230,11 @@ pub fn start(task_id: &TaskId, assignee: &str, db: &mut Database) -> Result<Task
 
     let base = db.base_path().to_owned();
     let task = db.get_task_mut(task_id).unwrap();
-    if !task.transition(TaskState::Pending, TaskState::InProgress) {
+    let started = task.transition_from_any(
+        &[TaskState::Pending, TaskState::Blocked],
+        TaskState::InProgress,
+    );
+    if !started {
         return Err(anyhow!(
             "Failed to start task: another process may have already started it"
         ));

@@ -199,6 +199,10 @@ pub enum TaskCommands {
         /// Who is claiming this task
         #[arg(long)]
         assignee: String,
+
+        /// Override blocked state and start anyway
+        #[arg(long)]
+        force: bool,
     },
 
     /// Mark a task as completed

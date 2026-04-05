@@ -45,16 +45,40 @@ rd task list <goal_id>
 # Filter tasks by priority
 rd task list <goal_id> --priority p0
 rd task list <goal_id> --verbose    # Include comments (truncated to terminal width)
+rd task list <goal_id> --full       # Show full descriptions without truncating
 rd task list <goal_id> --json       # Output as JSON
 ```
 
 `--verbose` truncates long comments to fit the terminal. If you see a hint that comments were
 truncated, use `rd task comments <task_id>` to read the full text.
 
+### Subtasks
+
+A task can have subtasks by passing `--parent` when creating. Subtasks let you break a large task
+into smaller tracked units. The parent reflects the aggregate state of its children.
+
+```bash
+# Create a subtask under an existing task
+rd task create <goal_id> "Write unit tests" --parent <parent_task_id>
+
+# Subtasks follow the same lifecycle as regular tasks
+rd task start <subtask_id> --assignee "agent-1"
+rd task complete <subtask_id> --result "Tests written and passing"
+```
+
+Rules for subtasks:
+
+- Subtasks cannot themselves have subtasks (one level only).
+- Subtasks cannot be added to a completed or failed parent.
+- A parent task cannot be started, completed, failed, retried, or released directly — work on its
+  subtasks instead.
+- The parent transitions to `completed` automatically when all subtasks complete.
+
 ### Task Lifecycle
 
 ```bash
-rd task start <task_id> --assignee "agent-1"     # Claim and start (--assignee required)
+rd task start <task_id> --assignee "agent-1"        # Claim and start (--assignee required)
+rd task start <task_id> --assignee "agent-1" --force # Start even if blocked (override deps)
 rd task complete <task_id> --result "Added login endpoint with JWT"
 rd task complete <task_id> --result "Done" --artifacts "src/auth.rs,src/jwt.rs"
 rd task complete <task_id> --result "Done" --tokens 1500 --elapsed 30000
@@ -71,6 +95,10 @@ rd task delete <task_id>                         # Delete a pending task
 The `--assignee` flag is required when starting a task. It records who claimed the task,
 preventing two agents/users from working on the same thing. Use `release` to unclaim a task
 from any state (e.g. if you get stuck) so another agent can pick it up.
+
+Use `--force` to start a blocked task without waiting for its blockers to complete. This
+overrides dependency enforcement — use it only when you are certain the blocker's output is
+already available by other means.
 
 ### Comments
 
@@ -103,6 +131,7 @@ rd edit task <task_id> --blocked-by task_abc,task_def
 
 ```bash
 rd list                      # All goals and tasks in dependency order
+rd list --full               # Show full descriptions without truncating
 rd list --json               # Output as JSON
 rd status                    # Compact overview of all goals
 rd status --goal <goal_id>   # Compact status of a goal and its tasks
@@ -135,8 +164,13 @@ rd clean --force             # Remove all goals regardless of status
 ### Task Rules
 
 - A contract (`--receives`, `--produces`, `--verify`) is required before a task can be started.
-- Tasks with `--blocked-by` start in `blocked` state and move to `pending` when all blockers complete.
-- Only `pending` tasks can be started or deleted.
+- Tasks with `--blocked-by` start in `blocked` state and move to `pending` when all blockers
+  complete. If a blocker is already completed when the task is created, it is filtered out and
+  does not block the new task.
+- `--blocked-by` accepts task IDs as comma-separated or space-separated values.
+- Only `pending` tasks can be started normally; `blocked` tasks can be started with `--force`.
+- Only `pending` tasks can be deleted. Deleting a task removes it from any downstream
+  `blocked_by` lists — tasks that were waiting only on the deleted task become `pending`.
 - Only `in_progress` tasks can be completed.
 - Only `in_progress` or `verifying` tasks can be failed.
 - Only `failed` tasks can be retried.
@@ -156,6 +190,8 @@ tried. They become compaction candidates for manual review.
 rd task fail <task_id> --reason "..." --compact  # Compact immediately on fail
 rd compact apply <task_id> --summary "..."       # Compact a failed task manually
 rd compact analyze                               # List tasks eligible for compaction
+rd compact analyze --goal <goal_id>              # Filter to a specific goal
+rd compact analyze --json                        # Output as JSON
 ```
 
 Failed tasks are automatically compacted when `retry_count` reaches 3, since the failure history

@@ -307,7 +307,11 @@ impl Task {
             return false;
         }
         self.state = to;
-        self.updated_at = Timestamp::now();
+        let now = Timestamp::now();
+        self.updated_at = now;
+        if to == TaskState::InProgress {
+            self.started_at = Some(now);
+        }
         true
     }
 
