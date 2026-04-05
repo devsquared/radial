@@ -121,7 +121,19 @@ pub fn create(
         None
     };
 
-    let blocked_by_ids = blocked_by.unwrap_or_default();
+    // Filter out already-completed blockers so a task created after its
+    // blockers finish starts as pending rather than permanently blocked.
+    let all_goal_tasks = db.list_tasks(&goal_id_owned);
+    let blocked_by_ids: Vec<TaskId> = blocked_by
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|id| {
+            all_goal_tasks
+                .iter()
+                .find(|t| t.id() == id)
+                .is_none_or(|t| t.state() != TaskState::Completed)
+        })
+        .collect();
     let state = if blocked_by_ids.is_empty() {
         TaskState::Pending
     } else {

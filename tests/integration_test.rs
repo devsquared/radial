@@ -1787,3 +1787,87 @@ fn test_delete_cascades_blocked_by_cleanup() {
         "Task B must have no stale blocked_by entries"
     );
 }
+
+#[test]
+fn test_create_task_blocked_by_completed_task_yields_pending() {
+    let env = TestEnv::new();
+    env.run(&["init"]).expect("Init failed");
+
+    let output = env
+        .run(&["goal", "create", "Completed blocker test"])
+        .expect("Create goal failed");
+    let goal_id = output
+        .lines()
+        .find(|l| l.contains("Created goal:"))
+        .and_then(|l| l.split_whitespace().nth(2))
+        .unwrap();
+
+    // Create task A with a contract so it can be started and completed
+    let output = env
+        .run(&[
+            "task",
+            "create",
+            goal_id,
+            "Task A",
+            "--receives",
+            "nothing",
+            "--produces",
+            "something",
+            "--verify",
+            "done",
+        ])
+        .expect("Create task A failed");
+    let task_a = output
+        .lines()
+        .find(|l| l.contains("Created task:"))
+        .and_then(|l| l.split_whitespace().nth(2))
+        .unwrap()
+        .to_string();
+
+    // Start and complete task A
+    env.run(&["task", "start", &task_a, "--assignee", "test"])
+        .expect("Start task A failed");
+    env.run(&["task", "complete", &task_a, "--result", "done"])
+        .expect("Complete task A failed");
+
+    // Create task B blocked by the already-completed task A
+    let output = env
+        .run(&[
+            "task",
+            "create",
+            goal_id,
+            "Task B",
+            "--receives",
+            "nothing",
+            "--produces",
+            "something",
+            "--verify",
+            "done",
+            "--blocked-by",
+            &task_a,
+        ])
+        .expect("Create task B blocked by completed task A failed");
+    let task_b = output
+        .lines()
+        .find(|l| l.contains("Created task:"))
+        .and_then(|l| l.split_whitespace().nth(2))
+        .unwrap()
+        .to_string();
+
+    // Task B should be pending, not blocked
+    let list_output = env
+        .run(&["task", "list", goal_id, "--json"])
+        .expect("List tasks failed");
+    let tasks: Value = serde_json::from_str(&list_output).expect("Invalid JSON");
+    let task_b_json = tasks
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|t| t["id"].as_str() == Some(&task_b))
+        .expect("Task B not found in list");
+    assert_eq!(
+        task_b_json["state"].as_str().unwrap(),
+        "pending",
+        "Task created with only completed blockers must start as pending"
+    );
+}
