@@ -62,7 +62,6 @@ pub fn create(
 
     let goal = goal.unwrap();
     let goal_id_owned = goal.id().clone();
-    let goal_state = goal.state();
 
     // Validate parent task if provided
     if let Some(ref pid) = parent_id {
@@ -152,11 +151,7 @@ pub fn create(
 
     // Update the goal
     let goal = db.get_goal_mut(&goal_id_owned).unwrap();
-    if goal_state == GoalState::Pending {
-        goal.mark_in_progress();
-    } else {
-        goal.touch();
-    }
+    goal.touch();
     goal.write_file(&base)?;
 
     Ok(task)
@@ -219,6 +214,8 @@ pub fn start(task_id: &TaskId, assignee: &str, db: &mut Database) -> Result<Task
         ));
     }
 
+    let goal_id = task.goal_id().to_owned();
+
     let base = db.base_path().to_owned();
     let task = db.get_task_mut(task_id).unwrap();
     if !task.transition(TaskState::Pending, TaskState::InProgress) {
@@ -229,7 +226,14 @@ pub fn start(task_id: &TaskId, assignee: &str, db: &mut Database) -> Result<Task
     task.set_assignee(Some(assignee.to_owned()));
     task.write_file(&base)?;
 
-    Ok(task.clone())
+    // Transition the goal to in_progress on first task start.
+    let goal = db.get_goal_mut(&goal_id).unwrap();
+    if goal.state() == GoalState::Pending {
+        goal.mark_in_progress();
+        goal.write_file(&base)?;
+    }
+
+    Ok(db.get_task(task_id).unwrap().clone())
 }
 
 /// Collect IDs of all in-progress tasks across all goals.
