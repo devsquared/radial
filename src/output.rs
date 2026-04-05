@@ -590,6 +590,32 @@ pub fn show(result: &ShowResult, opts: &RenderOptions) -> Result<()> {
     }
 }
 
+fn show_compacted_task(task: &Task, w: &mut dyn Write) -> Result<()> {
+    writeln!(w, "{}", style("[compacted]").dim())?;
+    if let Some(summary) = task.summary() {
+        writeln!(w)?;
+        writeln!(w, "{}", style("Summary").bold())?;
+        for line in summary.lines() {
+            writeln!(w, "  {line}")?;
+        }
+    }
+    if let Some(result) = task.result()
+        && !result.artifacts().is_empty()
+    {
+        writeln!(w)?;
+        writeln!(w, "{}", style("Artifacts").bold())?;
+        for artifact in result.artifacts() {
+            writeln!(w, "  {artifact}")?;
+        }
+    }
+    writeln!(w)?;
+    field(w, "Priority", task.priority().as_ref())?;
+    field(w, "Goal", task.goal_id().as_ref())?;
+    field(w, "Created", &task.created_at().to_string())?;
+    field(w, "Updated", &task.updated_at().to_string())?;
+    Ok(())
+}
+
 fn show_task(task: &Task, opts: &RenderOptions) -> Result<()> {
     json_or(task, opts, |w| {
         writeln!(
@@ -601,20 +627,7 @@ fn show_task(task: &Task, opts: &RenderOptions) -> Result<()> {
         writeln!(w)?;
 
         if task.compacted() {
-            writeln!(w, "{}", style("[compacted]").dim())?;
-            if let Some(summary) = task.summary() {
-                writeln!(w)?;
-                writeln!(w, "{}", style("Summary").bold())?;
-                for line in summary.lines() {
-                    writeln!(w, "  {line}")?;
-                }
-            }
-            writeln!(w)?;
-            field(w, "Priority", task.priority().as_ref())?;
-            field(w, "Goal", task.goal_id().as_ref())?;
-            field(w, "Created", &task.created_at().to_string())?;
-            field(w, "Updated", &task.updated_at().to_string())?;
-            return Ok(());
+            return show_compacted_task(task, w);
         }
 
         writeln!(w, "{}", style("Description").bold())?;
@@ -781,6 +794,7 @@ fn show_goal(
 pub fn ready_tasks(
     tasks: &[(Task, Option<Task>)],
     goal: &Goal,
+    stale_count: usize,
     opts: &RenderOptions,
 ) -> Result<()> {
     #[derive(serde::Serialize)]
@@ -838,6 +852,16 @@ pub fn ready_tasks(
             }
             writeln!(w)?;
         }
+
+        if stale_count > 0 {
+            writeln!(
+                w,
+                "### Stale Tasks\n\n\
+                 There are {stale_count} task(s) that have been in progress for over 2 hours.\n\
+                 Run `rd task release --stale 2h` to release them."
+            )?;
+        }
+
         Ok(())
     })
 }

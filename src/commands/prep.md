@@ -59,6 +59,8 @@ rd task complete <task_id> --result "Added login endpoint with JWT"
 rd task complete <task_id> --result "Done" --artifacts "src/auth.rs,src/jwt.rs"
 rd task complete <task_id> --result "Done" --tokens 1500 --elapsed 30000
 rd task fail <task_id>                           # Mark as failed
+rd task fail <task_id> --reason "Why it failed" # Mark failed with reason
+rd task fail <task_id> --reason "..." --compact  # Compact immediately (requires --reason)
 rd task retry <task_id>                          # Retry a failed task
 rd task release <task_id>                        # Release claim, back to pending
 rd task release --stale 1h                       # Release tasks in progress > 1 hour
@@ -110,7 +112,7 @@ rd show <id>                 # Full details of a goal or task (auto-detects)
 rd show <id> --json          # Output as JSON
 rd ready <goal_id>                # Show ready tasks, sorted by priority (p0 first)
 rd ready <goal_id> --priority p0  # Ready tasks filtered by priority
-rd ready <goal_id> --json    # Output as JSON
+rd ready <goal_id> --json    # Output as JSON (no advisories in JSON mode)
 ```
 
 Filter by assignee to see only your tasks:
@@ -138,6 +140,29 @@ rd clean --force             # Remove all goals regardless of status
 - Only `in_progress` tasks can be completed.
 - Only `in_progress` or `verifying` tasks can be failed.
 - Only `failed` tasks can be retried.
+- Completed tasks are auto-compacted; `rd compact apply` will reject them as already compacted.
+- Failed tasks with `retry_count >= 3` are auto-compacted on the failing call.
+
+### Compaction
+
+Completed tasks are automatically compacted on completion using the `--result` summary. This
+strips verbose history (contract, comments) while preserving the result summary and any artifact
+paths, keeping context small for future agents.
+
+Failed tasks preserve their full history by default, including comments documenting what was
+tried. They become compaction candidates for manual review.
+
+```bash
+rd task fail <task_id> --reason "..." --compact  # Compact immediately on fail
+rd compact apply <task_id> --summary "..."       # Compact a failed task manually
+rd compact analyze                               # List tasks eligible for compaction
+```
+
+Failed tasks are automatically compacted when `retry_count` reaches 3, since the failure history
+has been consumed by multiple agents at that point.
+
+`rd ready` surfaces a stale task advisory in terminal output when any tasks have been in progress
+for over 2 hours.
 
 ### Stale Task Recovery
 

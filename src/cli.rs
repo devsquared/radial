@@ -227,6 +227,14 @@ pub enum TaskCommands {
     Fail {
         /// The task ID to fail
         task_id: TaskId,
+
+        /// Reason for failure
+        #[arg(long)]
+        reason: Option<String>,
+
+        /// Compact the task immediately using the reason as its summary
+        #[arg(long, requires = "reason")]
+        compact: bool,
     },
 
     /// Retry a failed task

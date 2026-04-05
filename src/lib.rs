@@ -160,8 +160,12 @@ fn run_task(task_cmd: TaskCommands, db: &mut Database) -> Result<()> {
                 commands::task::complete(&task_id, result, artifacts, tokens, elapsed, db)?;
             output::task_completed(&complete_result)
         }
-        TaskCommands::Fail { task_id } => {
-            let task = commands::task::fail(&task_id, db)?;
+        TaskCommands::Fail {
+            task_id,
+            reason,
+            compact,
+        } => {
+            let task = commands::task::fail(&task_id, reason, compact, db)?;
             output::task_failed(&task)
         }
         TaskCommands::Retry { task_id } => {
@@ -203,6 +207,21 @@ fn run_task(task_cmd: TaskCommands, db: &mut Database) -> Result<()> {
             output::task_comments(&task, &RenderOptions::new())
         }
     }
+}
+
+fn handle_ready(
+    goal_id: &crate::id::GoalId,
+    priority: Option<crate::models::Priority>,
+    json: bool,
+) -> Result<()> {
+    let db = ensure_initialized()?;
+    let ready = commands::ready::run(goal_id, priority.as_ref(), &db)?;
+    let goal = db
+        .get_goal(goal_id)
+        .ok_or_else(|| anyhow!("Goal not found: {goal_id}"))?;
+    let stale_count =
+        commands::task::find_stale_tasks(jiff::SignedDuration::from_secs(2 * 3600), &db).len();
+    output::ready_tasks(&ready, goal, stale_count, &RenderOptions::new().json(json))
 }
 
 pub fn run(cli: Cli) -> Result<()> {
@@ -277,14 +296,7 @@ pub fn run(cli: Cli) -> Result<()> {
             goal_id,
             priority,
             json,
-        } => {
-            let db = ensure_initialized()?;
-            let ready = commands::ready::run(&goal_id, priority.as_ref(), &db)?;
-            let goal = db
-                .get_goal(&goal_id)
-                .ok_or_else(|| anyhow!("Goal not found: {goal_id}"))?;
-            output::ready_tasks(&ready, goal, &RenderOptions::new().json(json))
-        }
+        } => handle_ready(&goal_id, priority, json),
         Commands::Prep => {
             let db = ensure_initialized()?;
             let text = commands::prep::run(&db);
