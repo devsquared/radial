@@ -345,6 +345,11 @@ impl Task {
         self.comments.push(comment);
         self.updated_at = Timestamp::now();
     }
+
+    pub fn set_result(&mut self, outcome: Outcome) {
+        self.result = Some(outcome);
+        self.updated_at = Timestamp::now();
+    }
 }
 
 impl Render for Task {
@@ -362,6 +367,11 @@ impl Render for Task {
                 writeln!(w, "  {} {}", style("[compacted]").dim(), summary)?;
             } else {
                 writeln!(w, "  {}", style("[compacted]").dim())?;
+            }
+            if let Some(ref result) = self.result
+                && !result.artifacts().is_empty()
+            {
+                writeln!(w, "  Artifacts: {}", result.artifacts().join(", "))?;
             }
             return Ok(());
         }

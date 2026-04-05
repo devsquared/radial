@@ -375,6 +375,7 @@ pub fn complete(
     let retry_count = task.metrics().retry_count();
     let artifacts_list = artifacts.unwrap_or_default();
 
+    let compact_summary = result_summary.clone();
     let outcome = Outcome::new(result_summary, artifacts_list);
     let metrics = TaskMetrics::new(tokens.unwrap_or(0), elapsed.unwrap_or(0), retry_count);
 
@@ -385,6 +386,7 @@ pub fn complete(
             "Failed to complete task: another process may have changed its state"
         ));
     }
+    task.compact(compact_summary);
     task.write_file(&base)?;
     let completed_task = task.clone();
     let parent_id = completed_task.parent_id().cloned();
@@ -469,7 +471,12 @@ pub fn complete(
     })
 }
 
-pub fn fail(task_id: &TaskId, db: &mut Database) -> Result<Task> {
+pub fn fail(
+    task_id: &TaskId,
+    reason: Option<String>,
+    compact: bool,
+    db: &mut Database,
+) -> Result<Task> {
     let task = db.get_task(task_id);
 
     if task.is_none() {
@@ -501,6 +508,22 @@ pub fn fail(task_id: &TaskId, db: &mut Database) -> Result<Task> {
             "Failed to mark task as failed: state may have changed"
         ));
     }
+
+    if let Some(ref r) = reason {
+        task.set_result(Outcome::new(r.clone(), vec![]));
+    }
+
+    // Auto-compact when the agent explicitly requests it or the retry limit is reached.
+    // At 3+ retries the failure history has been consumed by multiple agents; compacting
+    // keeps it from polluting future context.
+    let should_compact = compact || task.metrics().retry_count() >= 3;
+    if should_compact {
+        // reason is guaranteed by CLI when --compact is set; use empty string as fallback
+        // for the retry-threshold path where reason was not provided.
+        let summary = reason.unwrap_or_default();
+        task.compact(summary);
+    }
+
     task.write_file(&base)?;
     let failed_task = task.clone();
 
