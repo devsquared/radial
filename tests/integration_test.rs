@@ -1622,3 +1622,68 @@ fn test_edit_task_blocked_by_rejects_cycles() {
     let err = result.unwrap_err();
     assert!(err.contains("Circular dependency detected"));
 }
+
+#[test]
+fn test_goal_stays_pending_until_task_start() {
+    let env = TestEnv::new();
+    env.run(&["init"]).expect("Init failed");
+
+    let output = env
+        .run(&["goal", "create", "Goal state test"])
+        .expect("Create goal failed");
+    let goal_id = output
+        .lines()
+        .find(|line| line.contains("Created goal:"))
+        .and_then(|line| line.split_whitespace().nth(2))
+        .unwrap();
+
+    // Goal should be pending before any tasks
+    let output = env
+        .run(&["goal", "list", "--json"])
+        .expect("Goal list --json failed");
+    let goals: Value = serde_json::from_str(&output).unwrap();
+    assert_eq!(goals[0]["state"], "pending");
+
+    // Create a task — goal must remain pending
+    let output = env
+        .run(&[
+            "task",
+            "create",
+            goal_id,
+            "First task",
+            "--receives",
+            "nothing",
+            "--produces",
+            "something",
+            "--verify",
+            "it works",
+        ])
+        .expect("Create task failed");
+    let task_id = output
+        .lines()
+        .find(|line| line.contains("Created task:"))
+        .and_then(|line| line.split_whitespace().nth(2))
+        .unwrap();
+
+    let output = env
+        .run(&["goal", "list", "--json"])
+        .expect("Goal list --json failed");
+    let goals: Value = serde_json::from_str(&output).unwrap();
+    assert_eq!(
+        goals[0]["state"], "pending",
+        "Goal must stay pending after task create, before task start"
+    );
+
+    // Start the task — goal transitions to in_progress
+    env.run(&["task", "start", task_id, "--assignee", "test-agent"])
+        .expect("Start task failed");
+
+    let output = env
+        .run(&["goal", "list", "--json"])
+        .expect("Goal list --json failed");
+    let goals: Value = serde_json::from_str(&output).unwrap();
+    assert_eq!(
+        goals[0]["state"], "inprogress",
+        "Goal must be in_progress after first task start"
+    );
+}
