@@ -1687,3 +1687,103 @@ fn test_goal_stays_pending_until_task_start() {
         "Goal must be in_progress after first task start"
     );
 }
+
+#[test]
+#[allow(clippy::similar_names)]
+fn test_delete_cascades_blocked_by_cleanup() {
+    let env = TestEnv::new();
+    env.run(&["init"]).expect("Init failed");
+
+    let output = env
+        .run(&["goal", "create", "Cascade blocked_by cleanup"])
+        .expect("Create goal failed");
+    let goal_id = output
+        .lines()
+        .find(|line| line.contains("Created goal:"))
+        .and_then(|line| line.split_whitespace().nth(2))
+        .unwrap();
+
+    // Create task A (the blocker)
+    let output = env
+        .run(&[
+            "task",
+            "create",
+            goal_id,
+            "Task A",
+            "--receives",
+            "nothing",
+            "--produces",
+            "something",
+            "--verify",
+            "it works",
+        ])
+        .expect("Create task A failed");
+    let task_a_id = output
+        .lines()
+        .find(|line| line.contains("Created task:"))
+        .and_then(|line| line.split_whitespace().nth(2))
+        .unwrap();
+
+    // Create task B blocked by A
+    let output = env
+        .run(&[
+            "task",
+            "create",
+            goal_id,
+            "Task B",
+            "--receives",
+            "nothing",
+            "--produces",
+            "something",
+            "--verify",
+            "it works",
+            "--blocked-by",
+            task_a_id,
+        ])
+        .expect("Create task B failed");
+    let task_b_id = output
+        .lines()
+        .find(|line| line.contains("Created task:"))
+        .and_then(|line| line.split_whitespace().nth(2))
+        .unwrap();
+
+    // Confirm B is blocked
+    let output = env
+        .run(&["task", "list", goal_id, "--json"])
+        .expect("Task list failed");
+    let tasks: Value = serde_json::from_str(&output).unwrap();
+    let task_b_blocked = tasks
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|t| t["id"].as_str() == Some(task_b_id))
+        .unwrap();
+    assert_eq!(task_b_blocked["state"], "blocked");
+
+    // Delete task A
+    env.run(&["task", "delete", task_a_id])
+        .expect("Delete task A failed");
+
+    // Task B must now be pending, not stuck in blocked
+    let output = env
+        .run(&["task", "list", goal_id, "--json"])
+        .expect("Task list after delete failed");
+    let tasks: Value = serde_json::from_str(&output).unwrap();
+    let task_b_unblocked = tasks
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|t| t["id"].as_str() == Some(task_b_id))
+        .unwrap();
+    assert_eq!(
+        task_b_unblocked["state"], "pending",
+        "Task B must be unblocked after its blocker is deleted"
+    );
+    assert!(
+        task_b_unblocked["blocked_by"].is_null()
+            || task_b_unblocked["blocked_by"]
+                .as_array()
+                .is_none_or(Vec::is_empty),
+        "Task B must have no stale blocked_by entries"
+    );
+}
