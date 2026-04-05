@@ -38,6 +38,7 @@ pub fn create(
     goal_id: &GoalId,
     description: String,
     priority: Priority,
+    parent_id: Option<TaskId>,
     receives: Option<String>,
     produces: Option<String>,
     verify: Option<String>,
@@ -62,6 +63,31 @@ pub fn create(
     let goal = goal.unwrap();
     let goal_id_owned = goal.id().clone();
     let goal_state = goal.state();
+
+    // Validate parent task if provided
+    if let Some(ref pid) = parent_id {
+        let parent = db
+            .get_task(pid)
+            .ok_or_else(|| anyhow!("Parent task not found: {pid}"))?;
+
+        if parent.goal_id() != &goal_id_owned {
+            return Err(anyhow!("Parent task {pid} belongs to a different goal"));
+        }
+
+        if parent.parent_id().is_some() {
+            return Err(anyhow!(
+                "Cannot create a subtask of a subtask: {pid} is already a subtask"
+            ));
+        }
+
+        let parent_state = parent.state();
+        if parent_state == TaskState::Completed || parent_state == TaskState::Failed {
+            return Err(anyhow!(
+                "Cannot add subtasks to a {} task",
+                parent_state.as_ref()
+            ));
+        }
+    }
 
     // Validate blocked_by task IDs exist
     if let Some(ref task_ids) = blocked_by {
@@ -106,6 +132,7 @@ pub fn create(
     let task = Task::new(
         TaskId::new(),
         goal_id_owned.clone(),
+        parent_id.clone(),
         description,
         priority,
         contract,
@@ -117,8 +144,13 @@ pub fn create(
 
     db.create_task(task.clone())?;
 
-    // Update the goal
+    // Sync parent state now that it has a new subtask
     let base = db.base_path().to_owned();
+    if let Some(ref pid) = parent_id {
+        db.sync_parent_state(pid, &base)?;
+    }
+
+    // Update the goal
     let goal = db.get_goal_mut(&goal_id_owned).unwrap();
     if goal_state == GoalState::Pending {
         goal.mark_in_progress();
@@ -158,6 +190,12 @@ pub fn start(task_id: &TaskId, assignee: &str, db: &mut Database) -> Result<Task
     }
 
     let task = task.unwrap();
+
+    if db.has_subtasks(task_id) {
+        return Err(anyhow!(
+            "Task {task_id} has subtasks and cannot be started directly. Start its subtasks instead."
+        ));
+    }
 
     if task.contract().is_none() {
         return Err(anyhow!(
@@ -209,6 +247,8 @@ fn collect_in_progress_task_ids(db: &Database) -> Vec<TaskId> {
 /// Falls back to `updated_at` for tasks without a `started_at` timestamp
 /// (i.e. tasks started before this feature was added).
 pub fn release_stale(threshold: SignedDuration, db: &mut Database) -> Result<Vec<Task>> {
+    use std::collections::HashSet;
+
     let cutoff = Timestamp::now().checked_sub(threshold)?;
     let task_ids = collect_in_progress_task_ids(db);
 
@@ -222,12 +262,20 @@ pub fn release_stale(threshold: SignedDuration, db: &mut Database) -> Result<Vec
     }
 
     let base = db.base_path().to_owned();
+    let mut parent_ids: HashSet<TaskId> = HashSet::new();
     let mut released = Vec::new();
     for id in &stale_ids {
         let task = db.get_task_mut(id).unwrap();
+        if let Some(pid) = task.parent_id().cloned() {
+            parent_ids.insert(pid);
+        }
         task.release();
         task.write_file(&base)?;
         released.push(task.clone());
+    }
+
+    for pid in &parent_ids {
+        db.sync_parent_state(pid, &base)?;
     }
 
     Ok(released)
@@ -235,15 +283,25 @@ pub fn release_stale(threshold: SignedDuration, db: &mut Database) -> Result<Vec
 
 /// Release every in-progress task regardless of how long it has been running.
 pub fn release_all_in_progress(db: &mut Database) -> Result<Vec<Task>> {
+    use std::collections::HashSet;
+
     let task_ids = collect_in_progress_task_ids(db);
     let base = db.base_path().to_owned();
 
+    let mut parent_ids: HashSet<TaskId> = HashSet::new();
     let mut released = Vec::new();
     for id in &task_ids {
         let task = db.get_task_mut(id).unwrap();
+        if let Some(pid) = task.parent_id().cloned() {
+            parent_ids.insert(pid);
+        }
         task.release();
         task.write_file(&base)?;
         released.push(task.clone());
+    }
+
+    for pid in &parent_ids {
+        db.sync_parent_state(pid, &base)?;
     }
 
     Ok(released)
@@ -284,6 +342,12 @@ pub fn complete(
 
     let task = task.unwrap();
 
+    if db.has_subtasks(task_id) {
+        return Err(anyhow!(
+            "Task {task_id} has subtasks and cannot be completed directly. Complete its subtasks instead."
+        ));
+    }
+
     if task.state() != TaskState::InProgress {
         return Err(anyhow!(
             "Task must be in 'in_progress' state to complete. Current state: {}",
@@ -307,18 +371,20 @@ pub fn complete(
     }
     task.write_file(&base)?;
     let completed_task = task.clone();
+    let parent_id = completed_task.parent_id().cloned();
 
-    // Snapshot only the fields needed for unblocking
-    let tasks_snapshot: Vec<(TaskId, TaskState, Vec<TaskId>)> = db
+    // Snapshot blocked tasks in this goal for unblocking checks
+    let tasks_snapshot: Vec<(TaskId, Vec<TaskId>)> = db
         .list_tasks(&goal_id)
         .iter()
         .filter(|t| t.state() == TaskState::Blocked)
-        .map(|t| (t.id().clone(), t.state(), t.blocked_by().to_vec()))
+        .map(|t| (t.id().clone(), t.blocked_by().to_vec()))
         .collect();
 
     let mut unblocked_task_ids = Vec::new();
 
-    for (dep_id, _, dep_blocked_by) in &tasks_snapshot {
+    // Unblock tasks that were waiting on this subtask
+    for (dep_id, dep_blocked_by) in &tasks_snapshot {
         if dep_blocked_by.contains(task_id) {
             let all_blockers_done = dep_blocked_by.iter().all(|blocker_id| {
                 db.get_task(blocker_id)
@@ -330,6 +396,35 @@ pub fn complete(
                 dep_task.unblock();
                 dep_task.write_file(&base)?;
                 unblocked_task_ids.push(dep_id.clone());
+            }
+        }
+    }
+
+    // Sync parent state and handle tasks blocked by the parent
+    if let Some(ref pid) = parent_id {
+        let new_parent_state = db.sync_parent_state(pid, &base)?;
+
+        if new_parent_state == Some(TaskState::Completed) {
+            // Unblock tasks that were waiting on the parent
+            let parent_blocked: Vec<(TaskId, Vec<TaskId>)> = db
+                .list_tasks(&goal_id)
+                .iter()
+                .filter(|t| t.state() == TaskState::Blocked && t.blocked_by().contains(pid))
+                .map(|t| (t.id().clone(), t.blocked_by().to_vec()))
+                .collect();
+
+            for (dep_id, dep_blocked_by) in &parent_blocked {
+                let all_blockers_done = dep_blocked_by.iter().all(|blocker_id| {
+                    db.get_task(blocker_id)
+                        .is_some_and(|t| t.state() == TaskState::Completed)
+                });
+
+                if all_blockers_done {
+                    let dep_task = db.get_task_mut(dep_id).unwrap();
+                    dep_task.unblock();
+                    dep_task.write_file(&base)?;
+                    unblocked_task_ids.push(dep_id.clone());
+                }
             }
         }
     }
@@ -367,6 +462,12 @@ pub fn fail(task_id: &TaskId, db: &mut Database) -> Result<Task> {
 
     let task = task.unwrap();
 
+    if db.has_subtasks(task_id) {
+        return Err(anyhow!(
+            "Task {task_id} has subtasks and cannot be failed directly. Fail its subtasks instead."
+        ));
+    }
+
     if task.state() != TaskState::InProgress && task.state() != TaskState::Verifying {
         return Err(anyhow!(
             "Task must be in 'in_progress' or 'verifying' state to fail. Current state: {}",
@@ -385,8 +486,13 @@ pub fn fail(task_id: &TaskId, db: &mut Database) -> Result<Task> {
         ));
     }
     task.write_file(&base)?;
+    let failed_task = task.clone();
 
-    Ok(task.clone())
+    if let Some(pid) = failed_task.parent_id() {
+        db.sync_parent_state(pid, &base)?;
+    }
+
+    Ok(failed_task)
 }
 
 pub fn retry(task_id: &TaskId, db: &mut Database) -> Result<Task> {
@@ -397,6 +503,12 @@ pub fn retry(task_id: &TaskId, db: &mut Database) -> Result<Task> {
     }
 
     let task = task.unwrap();
+
+    if db.has_subtasks(task_id) {
+        return Err(anyhow!(
+            "Task {task_id} has subtasks and cannot be retried directly. Retry its subtasks instead."
+        ));
+    }
 
     if task.state() != TaskState::Failed {
         return Err(anyhow!(
@@ -411,13 +523,24 @@ pub fn retry(task_id: &TaskId, db: &mut Database) -> Result<Task> {
         return Err(anyhow!("Failed to retry task: state may have changed"));
     }
     task.write_file(&base)?;
+    let retried_task = task.clone();
 
-    Ok(task.clone())
+    if let Some(pid) = retried_task.parent_id() {
+        db.sync_parent_state(pid, &base)?;
+    }
+
+    Ok(retried_task)
 }
 
 pub fn release(task_id: &TaskId, db: &mut Database) -> Result<Task> {
     if db.get_task(task_id).is_none() {
         return Err(task_not_found_err(task_id, db));
+    }
+
+    if db.has_subtasks(task_id) {
+        return Err(anyhow!(
+            "Task {task_id} has subtasks and cannot be released directly. Release its subtasks instead."
+        ));
     }
 
     let base = db.base_path().to_owned();
@@ -429,14 +552,25 @@ pub fn release(task_id: &TaskId, db: &mut Database) -> Result<Task> {
         ));
     }
     task.write_file(&base)?;
+    let released_task = task.clone();
 
-    Ok(task.clone())
+    if let Some(pid) = released_task.parent_id() {
+        db.sync_parent_state(pid, &base)?;
+    }
+
+    Ok(released_task)
 }
 
 pub fn delete(task_id: &TaskId, db: &mut Database) -> Result<Task> {
     let task = db
         .get_task(task_id)
         .ok_or_else(|| task_not_found_err(task_id, db))?;
+
+    if db.has_subtasks(task_id) {
+        return Err(anyhow!(
+            "Task {task_id} has subtasks. Delete its subtasks first."
+        ));
+    }
 
     if task.state() != TaskState::Pending {
         return Err(anyhow!(
@@ -446,7 +580,13 @@ pub fn delete(task_id: &TaskId, db: &mut Database) -> Result<Task> {
     }
 
     let task = task.clone();
+    let parent_id = task.parent_id().cloned();
     db.delete_task(task_id, task.goal_id())?;
+
+    if let Some(pid) = parent_id {
+        let base = db.base_path().to_owned();
+        db.sync_parent_state(&pid, &base)?;
+    }
 
     Ok(task)
 }
