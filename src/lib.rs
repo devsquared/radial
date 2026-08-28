@@ -13,7 +13,7 @@ pub mod output;
 
 use anyhow::{Context, Result, anyhow};
 use cli::{Cli, Commands, CompactCommands, EditCommands, GoalCommands, TaskCommands};
-use db::Database;
+use db::{Database, DbLock};
 use id::TaskId;
 use output::RenderOptions;
 use std::path::PathBuf;
@@ -79,11 +79,18 @@ fn parse_blocked_by(raw: Option<Vec<String>>) -> Result<Option<Vec<TaskId>>> {
     Ok(Some(ids?))
 }
 
-fn ensure_initialized() -> Result<Database> {
+fn ensure_initialized_for_write() -> Result<(Database, DbLock)> {
     let radial_dir = get_radial_path()
         .ok_or_else(|| anyhow!("Radial not initialized. Run 'radial init' first."))?;
 
-    Database::open(&radial_dir).context("Failed to open database")
+    Database::open_for_write(&radial_dir).context("Failed to open database for write")
+}
+
+fn ensure_initialized_for_read() -> Result<(Database, DbLock)> {
+    let radial_dir = get_radial_path()
+        .ok_or_else(|| anyhow!("Radial not initialized. Run 'radial init' first."))?;
+
+    Database::open_for_read(&radial_dir).context("Failed to open database for read")
 }
 
 fn run_goal(goal_cmd: GoalCommands, db: &mut Database) -> Result<()> {
@@ -218,7 +225,7 @@ fn handle_ready(
     priority: Option<crate::models::Priority>,
     json: bool,
 ) -> Result<()> {
-    let db = ensure_initialized()?;
+    let (db, _guard) = ensure_initialized_for_read()?;
     let ready = commands::ready::run(goal_id, priority.as_ref(), &db)?;
     let goal = db
         .get_goal(goal_id)
@@ -232,20 +239,20 @@ pub fn run(cli: Cli) -> Result<()> {
     match cli.command {
         Commands::Init { stealth } => commands::init::run(stealth),
         Commands::Goal(goal_cmd) => {
-            let mut db = ensure_initialized()?;
+            let (mut db, _guard) = ensure_initialized_for_write()?;
             run_goal(goal_cmd, &mut db)
         }
         Commands::List { json, full } => {
-            let db = ensure_initialized()?;
+            let (db, _guard) = ensure_initialized_for_read()?;
             let results = commands::list::run(&db)?;
             output::list(&results, &RenderOptions::new().json(json).full(full))
         }
         Commands::Task(task_cmd) => {
-            let mut db = ensure_initialized()?;
+            let (mut db, _guard) = ensure_initialized_for_write()?;
             run_task(task_cmd, &mut db)
         }
         Commands::Edit(edit_cmd) => {
-            let mut db = ensure_initialized()?;
+            let (mut db, _guard) = ensure_initialized_for_write()?;
             match edit_cmd {
                 EditCommands::Goal {
                     goal_id,
@@ -283,17 +290,17 @@ pub fn run(cli: Cli) -> Result<()> {
             assignee,
             json,
         } => {
-            let db = ensure_initialized()?;
+            let (db, _guard) = ensure_initialized_for_read()?;
             let result = commands::status::run(goal, task, assignee, &db)?;
             output::status(&result, &RenderOptions::new().json(json))
         }
         Commands::Show { id, json } => {
-            let db = ensure_initialized()?;
+            let (db, _guard) = ensure_initialized_for_read()?;
             let result = commands::show::run(&id, &db)?;
             output::show(&result, &RenderOptions::new().json(json))
         }
         Commands::Clean { all, force } => {
-            let mut db = ensure_initialized()?;
+            let (mut db, _guard) = ensure_initialized_for_write()?;
             commands::clean::run(all, force, &mut db)
         }
         Commands::Ready {
@@ -302,12 +309,12 @@ pub fn run(cli: Cli) -> Result<()> {
             json,
         } => handle_ready(&goal_id, priority, json),
         Commands::Prep => {
-            let db = ensure_initialized()?;
+            let (db, _guard) = ensure_initialized_for_read()?;
             let text = commands::prep::run(&db);
             output::prep(&text)
         }
         Commands::Compact(compact_cmd) => {
-            let mut db = ensure_initialized()?;
+            let (mut db, _guard) = ensure_initialized_for_write()?;
             match compact_cmd {
                 CompactCommands::Analyze { goal, json } => {
                     let candidates = commands::compact::analyze(goal.as_deref(), &db)?;

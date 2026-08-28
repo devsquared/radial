@@ -380,7 +380,7 @@ impl Render for Task {
             return Ok(());
         }
 
-        writeln!(w, "  {}", &self.description)?;
+        writeln!(w, "  {}", self.description)?;
 
         if let Some(parent_id) = &self.parent_id {
             writeln!(w, "  Parent: {parent_id}")?;
