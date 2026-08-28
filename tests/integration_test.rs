@@ -2308,3 +2308,77 @@ fn test_task_comments_nonexistent_task() {
         .expect_err("Expected error for nonexistent task");
     assert!(err.contains("not found") || err.contains("Task not found"));
 }
+
+#[test]
+fn test_concurrent_task_claim_race() {
+    use std::sync::{Arc, Barrier};
+    use std::thread;
+
+    const NUM_AGENTS: usize = 5;
+
+    let env = TestEnv::new();
+    env.run(&["init"]).expect("Init failed");
+
+    let goal_id = env
+        .run(&["goal", "create", "Concurrent claim test"])
+        .expect("Goal creation failed")
+        .lines()
+        .find(|l| l.starts_with("Created goal:"))
+        .and_then(|l| l.split_whitespace().nth(2))
+        .expect("Failed to extract goal ID")
+        .to_string();
+
+    let task_id = create_task_with_contract(&env, &goal_id, "Concurrent task");
+
+    // Spawn N processes simultaneously, all trying to claim the same task
+    let barrier = Arc::new(Barrier::new(NUM_AGENTS));
+    let work_dir = Arc::new(env.work_dir.clone());
+    let binary_path = Arc::new(env.binary_path.clone());
+    let task_id = Arc::new(task_id);
+
+    let handles: Vec<_> = (0..NUM_AGENTS)
+        .map(|i| {
+            let barrier = Arc::clone(&barrier);
+            let work_dir = Arc::clone(&work_dir);
+            let binary_path = Arc::clone(&binary_path);
+            let task_id = Arc::clone(&task_id);
+
+            thread::spawn(move || {
+                barrier.wait(); // All threads start simultaneously
+
+                let output = Command::new(binary_path.as_ref())
+                    .args([
+                        "task",
+                        "start",
+                        &task_id,
+                        "--assignee",
+                        &format!("agent-{i}"),
+                    ])
+                    .current_dir(work_dir.as_ref())
+                    .output()
+                    .expect("Failed to execute rd task start");
+
+                (i, output.status.success())
+            })
+        })
+        .collect();
+
+    let results: Vec<_> = handles.into_iter().map(|h| h.join().unwrap()).collect();
+
+    // Exactly one agent should have successfully claimed the task
+    let successful_claims = results.iter().filter(|(_, success)| *success).count();
+    assert_eq!(
+        successful_claims, 1,
+        "Expected exactly 1 successful claim, got {successful_claims}. Results: {results:?}"
+    );
+
+    // Verify the task is no longer pending (one agent claimed it)
+    let output = env.run(&["show", &task_id]).expect("show task failed");
+
+    // The task should show one of the agents as assignee
+    let has_assignee = (0..NUM_AGENTS).any(|i| output.contains(&format!("agent-{i}")));
+    assert!(
+        has_assignee,
+        "Task should have an assignee from one of the agents"
+    );
+}
