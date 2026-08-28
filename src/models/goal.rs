@@ -201,7 +201,7 @@ impl Render for Goal {
             style(&self.id).cyan().bold(),
             style(self.state.as_ref()).yellow()
         )?;
-        writeln!(w, "  {}", &self.description)?;
+        writeln!(w, "  {}", self.description)?;
         Ok(())
     }
 }
