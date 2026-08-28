@@ -47,10 +47,10 @@ fn add_to_gitignore() -> Result<()> {
     // Check if already excluded
     if target_path.exists() {
         let content = fs::read_to_string(target_path).unwrap_or_default();
-        if content
+        let has_radial = content
             .lines()
-            .any(|line| line.trim() == ".radial" || line.trim() == ".radial/")
-        {
+            .any(|line| line.trim() == ".radial" || line.trim() == ".radial/");
+        if has_radial {
             return Ok(());
         }
     }

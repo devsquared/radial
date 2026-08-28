@@ -1,7 +1,9 @@
 use std::collections::HashMap;
-use std::fs::{self, File};
+use std::fs::{self, File, OpenOptions};
 use std::io::Write;
 use std::path::{Path, PathBuf};
+use std::thread;
+use std::time::Duration;
 
 use anyhow::{Context, Result, anyhow, bail};
 use fs2::FileExt;
@@ -9,17 +11,69 @@ use fs2::FileExt;
 use crate::id::{GoalId, TaskId};
 use crate::models::{Goal, Metrics, Task, TaskState};
 
+/// RAII guard for the database-wide advisory lock.
+///
+/// Holds a file handle to `.radial/.lock` and releases the lock on drop.
+/// The lock is advisory (flock on Unix, `LockFileEx` on Windows) and protects
+/// the entire read→mutate→write cycle from TOCTOU races.
+pub struct DbLock {
+    #[allow(dead_code)]
+    file: File,
+}
+
+impl Drop for DbLock {
+    fn drop(&mut self) {
+        // unlock() is called automatically on drop, but also on process exit
+        let _ = self.file.unlock();
+    }
+}
+
+/// Try to acquire a lock with exponential backoff and timeout.
+///
+/// Retries with increasing delays (10ms, 20ms, 40ms, ..., capped at 500ms)
+/// for up to 5 seconds total before failing with a helpful error.
+fn try_acquire_lock(file: &File, exclusive: bool) -> Result<()> {
+    const TIMEOUT_SECS: u64 = 5;
+    const INITIAL_BACKOFF_MS: u64 = 10;
+    const MAX_BACKOFF_MS: u64 = 500;
+
+    let start = std::time::Instant::now();
+    let mut backoff_ms = INITIAL_BACKOFF_MS;
+
+    loop {
+        let lock_result = if exclusive {
+            file.try_lock_exclusive().map_err(anyhow::Error::from)
+        } else {
+            file.try_lock_shared().map_err(anyhow::Error::from)
+        };
+
+        match lock_result {
+            Ok(()) => return Ok(()),
+            Err(_) if start.elapsed().as_secs() >= TIMEOUT_SECS => {
+                bail!(
+                    ".radial is locked by another process (waited {TIMEOUT_SECS}s). \
+                     Retry, or delete .radial/.lock if no radial process is running."
+                );
+            }
+            Err(_) => {
+                thread::sleep(Duration::from_millis(backoff_ms));
+                backoff_ms = (backoff_ms * 2).min(MAX_BACKOFF_MS);
+            }
+        }
+    }
+}
+
 /// Atomically write content to a file using a temporary file + rename.
+///
+/// The database-wide lock protects against concurrent modifications.
+/// This function handles crash safety via tmp+rename.
 pub fn atomic_write(path: &Path, content: &[u8]) -> Result<()> {
     let temp = path.with_extension("toml.tmp");
     let mut file = File::create(&temp)
         .with_context(|| format!("Failed to create temporary file: {}", temp.display()))?;
-    file.lock_exclusive()
-        .context("Failed to acquire file lock")?;
     file.write_all(content)
         .context("Failed to write file content")?;
     file.sync_all().context("Failed to sync file")?;
-    file.unlock().context("Failed to unlock file")?;
     fs::rename(&temp, path).with_context(|| format!("Failed to rename to {}", path.display()))?;
     Ok(())
 }
@@ -47,6 +101,60 @@ impl Database {
 
         db.load()?;
         Ok(db)
+    }
+
+    /// Open the database with an exclusive lock for mutations.
+    ///
+    /// Acquires `.radial/.lock` exclusively, then loads the database.
+    /// The lock is held until the returned `DbLock` guard is dropped.
+    /// Retries with exponential backoff for up to 5s before failing.
+    /// Use this for all commands that modify state.
+    pub fn open_for_write<P: AsRef<Path>>(path: P) -> Result<(Self, DbLock)> {
+        let path = path.as_ref();
+
+        if !path.exists() {
+            bail!("Database directory does not exist: {}", path.display());
+        }
+
+        let lock_path = path.join(".lock");
+        let file = OpenOptions::new()
+            .create(true)
+            .truncate(false)
+            .write(true)
+            .open(&lock_path)
+            .with_context(|| format!("Failed to open lock file: {}", lock_path.display()))?;
+
+        try_acquire_lock(&file, true)?;
+
+        let db = Self::open(path)?;
+        Ok((db, DbLock { file }))
+    }
+
+    /// Open the database with a shared lock for reads.
+    ///
+    /// Acquires `.radial/.lock` in shared mode, then loads the database.
+    /// The lock prevents observing multi-file writes mid-flight.
+    /// Retries with exponential backoff for up to 5s before failing.
+    /// Use this for read-only commands.
+    pub fn open_for_read<P: AsRef<Path>>(path: P) -> Result<(Self, DbLock)> {
+        let path = path.as_ref();
+
+        if !path.exists() {
+            bail!("Database directory does not exist: {}", path.display());
+        }
+
+        let lock_path = path.join(".lock");
+        let file = OpenOptions::new()
+            .create(true)
+            .truncate(false)
+            .write(true)
+            .open(&lock_path)
+            .with_context(|| format!("Failed to open lock file: {}", lock_path.display()))?;
+
+        try_acquire_lock(&file, false)?;
+
+        let db = Self::open(path)?;
+        Ok((db, DbLock { file }))
     }
 
     /// Initialize a new database. The `.radial/` directory must already exist.
@@ -697,5 +805,124 @@ mod tests {
     #[rstest]
     fn open_nonexistent_dir_fails() {
         assert!(Database::open("/tmp/definitely_does_not_exist_radial").is_err());
+    }
+
+    // -- locking --
+
+    // DbLock RAII: dropping the guard should release the lock so another
+    // thread can acquire it.
+    #[rstest]
+    fn dblock_raii_releases_on_drop(db: (TempDir, Database)) {
+        let (dir, _db) = db;
+
+        // Acquire write lock, then drop it
+        {
+            let (_db, _guard) = Database::open_for_write(dir.path()).unwrap();
+            // Lock is held here
+        }
+        // Lock released on guard drop
+
+        // Should be able to acquire again immediately
+        let result = Database::open_for_write(dir.path());
+        assert!(result.is_ok());
+    }
+
+    // Two threads racing to open_for_write should serialize: exactly one
+    // acquires the lock at a time, both succeed eventually.
+    #[rstest]
+    fn concurrent_write_locks_serialize(db: (TempDir, Database)) {
+        use std::sync::{Arc, Barrier};
+        use std::thread;
+
+        let (dir, _db) = db;
+        let path = Arc::new(dir.path().to_path_buf());
+
+        let barrier = Arc::new(Barrier::new(2));
+        let mut handles = vec![];
+
+        for i in 0..2 {
+            let path = Arc::clone(&path);
+            let barrier = Arc::clone(&barrier);
+
+            let handle = thread::spawn(move || {
+                barrier.wait(); // Start both threads simultaneously
+                let result = Database::open_for_write(&*path);
+                (i, result.is_ok())
+            });
+            handles.push(handle);
+        }
+
+        let results: Vec<_> = handles.into_iter().map(|h| h.join().unwrap()).collect();
+
+        // Both should succeed (one waits for the other)
+        assert!(results[0].1, "Thread 0 failed to acquire lock");
+        assert!(results[1].1, "Thread 1 failed to acquire lock");
+    }
+
+    // Multiple threads should be able to hold shared locks simultaneously.
+    #[rstest]
+    fn concurrent_read_locks_allowed(db: (TempDir, Database)) {
+        use std::sync::{Arc, Barrier};
+        use std::thread;
+
+        let (dir, _db) = db;
+        let path = Arc::new(dir.path().to_path_buf());
+
+        let barrier = Arc::new(Barrier::new(3));
+        let mut handles = vec![];
+
+        for i in 0..3 {
+            let path = Arc::clone(&path);
+            let barrier = Arc::clone(&barrier);
+
+            let handle = thread::spawn(move || {
+                let (_db, _guard) = Database::open_for_read(&*path).unwrap();
+                barrier.wait(); // All threads hold locks simultaneously
+                thread::sleep(std::time::Duration::from_millis(10));
+                i
+            });
+            handles.push(handle);
+        }
+
+        // All threads should complete without deadlock
+        let results: Vec<_> = handles.into_iter().map(|h| h.join().unwrap()).collect();
+        assert_eq!(results.len(), 3);
+    }
+
+    // open_for_write should block until an existing write lock is released.
+    #[rstest]
+    fn write_lock_blocks_write_lock(db: (TempDir, Database)) {
+        use std::sync::mpsc;
+        use std::thread;
+
+        let (dir, _db) = db;
+        let path = dir.path().to_path_buf();
+
+        let (tx, rx) = mpsc::channel();
+
+        // Hold write lock in background thread
+        let path_clone = path.clone();
+        let handle = thread::spawn(move || {
+            let (_db, _guard) = Database::open_for_write(&path_clone).unwrap();
+            tx.send(()).unwrap(); // Signal lock acquired
+            thread::sleep(std::time::Duration::from_millis(50));
+            // Lock released on drop
+        });
+
+        // Wait for first lock to be acquired
+        rx.recv().unwrap();
+
+        // Try to acquire second lock - should block briefly then succeed
+        let start = std::time::Instant::now();
+        let result = Database::open_for_write(&path);
+        let elapsed = start.elapsed();
+
+        assert!(result.is_ok());
+        assert!(
+            elapsed.as_millis() >= 40,
+            "Second lock acquired too quickly (no blocking occurred)"
+        );
+
+        handle.join().unwrap();
     }
 }
