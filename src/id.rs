@@ -3,12 +3,13 @@ use std::str::FromStr;
 
 use serde::{Deserialize, Serialize};
 
-/// Validate that an ID string is exactly 8 alphanumeric characters.
+/// Validate that an ID string is 1-8 alphanumeric characters.
+/// Accepts legacy mixed-case IDs and normalizes to lowercase internally.
 fn validate_id(s: &str) -> Result<(), IdParseError> {
-    if s.len() != 8 {
+    if s.is_empty() || s.len() > 8 {
         return Err(IdParseError {
             value: s.to_owned(),
-            reason: "must be exactly 8 characters",
+            reason: "must be 1-8 characters",
         });
     }
     if !s.chars().all(|c| c.is_ascii_alphanumeric()) {
@@ -36,14 +37,15 @@ impl fmt::Display for IdParseError {
 impl std::error::Error for IdParseError {}
 
 /// Generate a safe 8-character ID
-/// Uses alphanumeric characters only (no dashes or underscores)
-/// to avoid conflicts with CLI flag parsing
+/// Uses lowercase alphanumeric characters with confusables removed:
+/// - Digits: 2-9 (excludes 0/O and 1/I/l confusion)
+/// - Letters: a-z minus i, l, o, u (removes confusables and vulgar word prevention)
+///
+/// This gives 30 characters total, providing 30^8 ≈ 6.56 × 10^11 combinations.
 pub(crate) fn generate_id() -> String {
-    const ALPHABET: [char; 62] = [
-        '0', '1', '2', '3', '4', '5', '6', '7', '8', '9', 'A', 'B', 'C', 'D', 'E', 'F', 'G', 'H',
-        'I', 'J', 'K', 'L', 'M', 'N', 'O', 'P', 'Q', 'R', 'S', 'T', 'U', 'V', 'W', 'X', 'Y', 'Z',
-        'a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j', 'k', 'l', 'm', 'n', 'o', 'p', 'q', 'r',
-        's', 't', 'u', 'v', 'w', 'x', 'y', 'z',
+    const ALPHABET: [char; 30] = [
+        '2', '3', '4', '5', '6', '7', '8', '9', 'a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'j', 'k',
+        'm', 'n', 'p', 'q', 'r', 's', 't', 'v', 'w', 'x', 'y', 'z',
     ];
 
     nanoid::nanoid!(8, &ALPHABET)
@@ -85,7 +87,7 @@ impl FromStr for GoalId {
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         validate_id(s)?;
-        Ok(Self(s.to_owned()))
+        Ok(Self(s.to_ascii_lowercase()))
     }
 }
 
@@ -125,7 +127,7 @@ impl FromStr for TaskId {
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         validate_id(s)?;
-        Ok(Self(s.to_owned()))
+        Ok(Self(s.to_ascii_lowercase()))
     }
 }
 
@@ -191,8 +193,8 @@ mod tests {
 
     #[test]
     fn test_rejects_wrong_length() {
-        assert!("short".parse::<GoalId>().is_err());
-        assert!("waytoolong123".parse::<TaskId>().is_err());
+        assert!("waytoolong123".parse::<GoalId>().is_err());
+        assert!("123456789".parse::<TaskId>().is_err());
     }
 
     #[test]
@@ -204,9 +206,9 @@ mod tests {
 
     #[test]
     fn test_error_message_includes_value() {
-        let err = "bad".parse::<GoalId>().unwrap_err();
-        assert!(err.to_string().contains("bad"));
-        assert!(err.to_string().contains("8 characters"));
+        let err = "toolongid".parse::<GoalId>().unwrap_err();
+        assert!(err.to_string().contains("toolongid"));
+        assert!(err.to_string().contains("1-8 characters"));
     }
 
     #[test]
@@ -214,5 +216,42 @@ mod tests {
         // From<String> is for internal use and does not validate
         let id = GoalId::from("anything".to_string());
         assert_eq!(id.as_ref(), "anything");
+    }
+
+    #[test]
+    fn test_legacy_mixed_case_ids_parse() {
+        let id1: GoalId = "t8zwaROl".parse().unwrap();
+        assert_eq!(id1.as_ref(), "t8zwarol");
+
+        let id2: TaskId = "xYz9Kp2m".parse().unwrap();
+        assert_eq!(id2.as_ref(), "xyz9kp2m");
+
+        let id3: GoalId = "V1StGXR8".parse().unwrap();
+        assert_eq!(id3.as_ref(), "v1stgxr8");
+    }
+
+    #[test]
+    fn test_case_folding_normalization() {
+        let upper: GoalId = "ABCD1234".parse().unwrap();
+        let lower: GoalId = "abcd1234".parse().unwrap();
+        let mixed: GoalId = "AbCd1234".parse().unwrap();
+
+        assert_eq!(upper.as_ref(), "abcd1234");
+        assert_eq!(lower.as_ref(), "abcd1234");
+        assert_eq!(mixed.as_ref(), "abcd1234");
+        assert_eq!(upper.as_ref(), lower.as_ref());
+        assert_eq!(lower.as_ref(), mixed.as_ref());
+    }
+
+    #[test]
+    fn test_prefix_lengths_validate() {
+        assert!("a".parse::<GoalId>().is_ok());
+        assert!("ab".parse::<GoalId>().is_ok());
+        assert!("abc".parse::<GoalId>().is_ok());
+        assert!("abcd".parse::<TaskId>().is_ok());
+        assert!("abcde".parse::<TaskId>().is_ok());
+        assert!("abcdef".parse::<TaskId>().is_ok());
+        assert!("abcdefg".parse::<TaskId>().is_ok());
+        assert!("abcdefgh".parse::<GoalId>().is_ok());
     }
 }
