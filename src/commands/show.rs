@@ -20,11 +20,19 @@ pub enum ShowResult {
 
 pub fn run(id: &str, db: &Database) -> Result<ShowResult> {
     // Try task first (more common lookup), then goal
-    if let Some(task) = db.resolve_task_id(id).ok().and_then(|tid| db.get_task(&tid)) {
+    if let Some(task) = db
+        .resolve_task_id(id)
+        .ok()
+        .and_then(|tid| db.get_task(&tid))
+    {
         return Ok(ShowResult::Task(task.clone()));
     }
 
-    if let Some(goal_and_id) = db.resolve_goal_id(id).ok().and_then(|gid| db.get_goal(&gid).map(|g| (gid, g))) {
+    if let Some(goal_and_id) = db
+        .resolve_goal_id(id)
+        .ok()
+        .and_then(|gid| db.get_goal(&gid).map(|g| (gid, g)))
+    {
         let (goal_id, goal) = goal_and_id;
         let tasks: Vec<Task> = db.list_tasks(&goal_id).into_iter().cloned().collect();
         let metrics = db.compute_goal_metrics(&goal_id);
