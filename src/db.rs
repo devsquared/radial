@@ -8,8 +8,48 @@ use std::time::Duration;
 use anyhow::{Context, Result, anyhow, bail};
 use fs2::FileExt;
 
+use crate::helpers::find_similar_id;
 use crate::id::{GoalId, TaskId};
 use crate::models::{Goal, Metrics, Task, TaskState};
+
+/// Error returned when resolving an ID prefix fails.
+#[derive(Debug, Clone)]
+pub enum ResolveError {
+    /// No ID matches the input prefix.
+    NotFound {
+        input: String,
+        suggestion: Option<String>,
+    },
+    /// Multiple IDs match the input prefix.
+    Ambiguous { input: String, matches: Vec<String> },
+}
+
+impl std::fmt::Display for ResolveError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::NotFound { input, suggestion } => {
+                write!(f, "ID '{input}' not found")?;
+                if let Some(hint) = suggestion {
+                    write!(f, ". Did you mean {hint}?")?;
+                }
+                Ok(())
+            }
+            Self::Ambiguous { input, matches } => {
+                write!(f, "Ambiguous ID '{input}' matches multiple IDs:")?;
+                for (i, id) in matches.iter().take(5).enumerate() {
+                    write!(f, "\n  {id}")?;
+                    if i == 4 && matches.len() > 5 {
+                        write!(f, "\n  ... and {} more", matches.len() - 5)?;
+                        break;
+                    }
+                }
+                write!(f, "\nTip: Use more characters to disambiguate")
+            }
+        }
+    }
+}
+
+impl std::error::Error for ResolveError {}
 
 /// RAII guard for the database-wide advisory lock.
 ///
@@ -396,6 +436,80 @@ impl Database {
             tasks_completed,
             tasks_failed,
         )
+    }
+
+    /// Resolve a goal ID from a prefix or full ID string.
+    ///
+    /// Tries in order:
+    /// 1. Exact match (case-insensitive)
+    /// 2. Unique prefix match
+    /// 3. Returns `NotFound` with levenshtein suggestion if no matches
+    /// 4. Returns Ambiguous if multiple prefix matches
+    pub fn resolve_goal_id(&self, input: &str) -> Result<GoalId, ResolveError> {
+        let input_lower = input.to_ascii_lowercase();
+
+        let matches: Vec<&GoalId> = self
+            .goals
+            .keys()
+            .filter(|id| id.as_ref().starts_with(&input_lower))
+            .collect();
+
+        match matches.len() {
+            1 => Ok((*matches[0]).clone()),
+            0 => {
+                let candidates: Vec<&str> = self.goals.keys().map(AsRef::as_ref).collect();
+                let suggestion = find_similar_id(&input_lower, &candidates).map(String::from);
+                Err(ResolveError::NotFound {
+                    input: input.to_string(),
+                    suggestion,
+                })
+            }
+            _ => {
+                let match_strs: Vec<String> =
+                    matches.iter().map(|id| id.as_ref().to_string()).collect();
+                Err(ResolveError::Ambiguous {
+                    input: input.to_string(),
+                    matches: match_strs,
+                })
+            }
+        }
+    }
+
+    /// Resolve a task ID from a prefix or full ID string.
+    ///
+    /// Tries in order:
+    /// 1. Exact match (case-insensitive)
+    /// 2. Unique prefix match
+    /// 3. Returns `NotFound` with levenshtein suggestion if no matches
+    /// 4. Returns Ambiguous if multiple prefix matches
+    pub fn resolve_task_id(&self, input: &str) -> Result<TaskId, ResolveError> {
+        let input_lower = input.to_ascii_lowercase();
+
+        let matches: Vec<&TaskId> = self
+            .tasks
+            .keys()
+            .filter(|id| id.as_ref().starts_with(&input_lower))
+            .collect();
+
+        match matches.len() {
+            1 => Ok((*matches[0]).clone()),
+            0 => {
+                let candidates: Vec<&str> = self.tasks.keys().map(AsRef::as_ref).collect();
+                let suggestion = find_similar_id(&input_lower, &candidates).map(String::from);
+                Err(ResolveError::NotFound {
+                    input: input.to_string(),
+                    suggestion,
+                })
+            }
+            _ => {
+                let match_strs: Vec<String> =
+                    matches.iter().map(|id| id.as_ref().to_string()).collect();
+                Err(ResolveError::Ambiguous {
+                    input: input.to_string(),
+                    matches: match_strs,
+                })
+            }
+        }
     }
 }
 
@@ -924,5 +1038,197 @@ mod tests {
         );
 
         handle.join().unwrap();
+    }
+
+    #[rstest]
+    fn resolve_goal_exact_match(mut db: (TempDir, Database)) {
+        let (_dir, db) = &mut db;
+        let goal1 = Goal::new(
+            goal_id("abc12345"),
+            "Test goal".to_string(),
+            GoalState::Pending,
+            Timestamp::now(),
+            Timestamp::now(),
+            None,
+            Metrics::default(),
+        );
+        db.create_goal(goal1).unwrap();
+
+        let result = db.resolve_goal_id("abc12345");
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap().as_ref(), "abc12345");
+    }
+
+    #[rstest]
+    fn resolve_goal_unique_prefix(mut db: (TempDir, Database)) {
+        let (_dir, db) = &mut db;
+        let goal1 = Goal::new(
+            goal_id("abc12345"),
+            "Test goal".to_string(),
+            GoalState::Pending,
+            Timestamp::now(),
+            Timestamp::now(),
+            None,
+            Metrics::default(),
+        );
+        db.create_goal(goal1).unwrap();
+
+        let result = db.resolve_goal_id("abc");
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap().as_ref(), "abc12345");
+    }
+
+    #[rstest]
+    fn resolve_goal_ambiguous_prefix(mut db: (TempDir, Database)) {
+        let (_dir, db) = &mut db;
+        let goal1 = Goal::new(
+            goal_id("abc12345"),
+            "Test goal 1".to_string(),
+            GoalState::Pending,
+            Timestamp::now(),
+            Timestamp::now(),
+            None,
+            Metrics::default(),
+        );
+        let goal2 = Goal::new(
+            goal_id("abc67890"),
+            "Test goal 2".to_string(),
+            GoalState::Pending,
+            Timestamp::now(),
+            Timestamp::now(),
+            None,
+            Metrics::default(),
+        );
+        db.create_goal(goal1).unwrap();
+        db.create_goal(goal2).unwrap();
+
+        let result = db.resolve_goal_id("abc");
+        assert!(result.is_err());
+        match result.unwrap_err() {
+            super::ResolveError::Ambiguous { input, matches } => {
+                assert_eq!(input, "abc");
+                assert_eq!(matches.len(), 2);
+                assert!(matches.contains(&"abc12345".to_string()));
+                assert!(matches.contains(&"abc67890".to_string()));
+            }
+            super::ResolveError::NotFound { .. } => panic!("Expected Ambiguous error"),
+        }
+    }
+
+    #[rstest]
+    fn resolve_goal_not_found(db: (TempDir, Database)) {
+        let (_dir, db) = db;
+        let result = db.resolve_goal_id("xyz");
+        assert!(result.is_err());
+        match result.unwrap_err() {
+            super::ResolveError::NotFound { input, .. } => {
+                assert_eq!(input, "xyz");
+            }
+            super::ResolveError::Ambiguous { .. } => panic!("Expected NotFound error"),
+        }
+    }
+
+    #[rstest]
+    fn resolve_goal_case_insensitive(mut db: (TempDir, Database)) {
+        let (_dir, db) = &mut db;
+        let goal1 = Goal::new(
+            goal_id("abc12345"),
+            "Test goal".to_string(),
+            GoalState::Pending,
+            Timestamp::now(),
+            Timestamp::now(),
+            None,
+            Metrics::default(),
+        );
+        db.create_goal(goal1).unwrap();
+
+        let result = db.resolve_goal_id("ABC");
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap().as_ref(), "abc12345");
+    }
+
+    #[rstest]
+    fn resolve_task_unique_prefix(mut db: (TempDir, Database)) {
+        let (_dir, db) = &mut db;
+        let goal = Goal::new(
+            goal_id("g1"),
+            "Test goal".to_string(),
+            GoalState::Pending,
+            Timestamp::now(),
+            Timestamp::now(),
+            None,
+            Metrics::default(),
+        );
+        db.create_goal(goal).unwrap();
+
+        let task = crate::models::Task::new(
+            task_id("t8zwarp9"),
+            goal_id("g1"),
+            None,
+            "Test task".to_string(),
+            Priority::default(),
+            None,
+            TaskState::Pending,
+            vec![],
+            Timestamp::now(),
+            Timestamp::now(),
+        );
+        db.create_task(task).unwrap();
+
+        let result = db.resolve_task_id("t8z");
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap().as_ref(), "t8zwarp9");
+    }
+
+    #[rstest]
+    fn resolve_task_ambiguous(mut db: (TempDir, Database)) {
+        let (_dir, db) = &mut db;
+        let goal = Goal::new(
+            goal_id("g1"),
+            "Test goal".to_string(),
+            GoalState::Pending,
+            Timestamp::now(),
+            Timestamp::now(),
+            None,
+            Metrics::default(),
+        );
+        db.create_goal(goal).unwrap();
+
+        let task1 = crate::models::Task::new(
+            task_id("t8zwarp9"),
+            goal_id("g1"),
+            None,
+            "Test task 1".to_string(),
+            Priority::default(),
+            None,
+            TaskState::Pending,
+            vec![],
+            Timestamp::now(),
+            Timestamp::now(),
+        );
+        let task2 = crate::models::Task::new(
+            task_id("t8zfoo12"),
+            goal_id("g1"),
+            None,
+            "Test task 2".to_string(),
+            Priority::default(),
+            None,
+            TaskState::Pending,
+            vec![],
+            Timestamp::now(),
+            Timestamp::now(),
+        );
+        db.create_task(task1).unwrap();
+        db.create_task(task2).unwrap();
+
+        let result = db.resolve_task_id("t8z");
+        assert!(result.is_err());
+        match result.unwrap_err() {
+            super::ResolveError::Ambiguous { input, matches } => {
+                assert_eq!(input, "t8z");
+                assert_eq!(matches.len(), 2);
+            }
+            super::ResolveError::NotFound { .. } => panic!("Expected Ambiguous error"),
+        }
     }
 }
