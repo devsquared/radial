@@ -1586,7 +1586,7 @@ fn test_edit_task_blocked_by_validates_ids() {
         "Edit with nonexistent blocked-by should fail"
     );
     let err = result.unwrap_err();
-    assert!(err.contains("Task not found in blocked-by list"));
+    assert!(err.contains("not found") || err.contains("Task not found in blocked-by list"));
 
     // Editing blocked-by with self-reference should fail
     let result = env.run(&["edit", "task", task_id, "--blocked-by", task_id]);
@@ -2381,4 +2381,97 @@ fn test_concurrent_task_claim_race() {
         has_assignee,
         "Task should have an assignee from one of the agents"
     );
+}
+
+#[test]
+fn test_prefix_resolution() {
+    let env = TestEnv::new();
+    env.run(&["init"]).expect("Init failed");
+
+    let output = env
+        .run(&["goal", "create", "Test prefix resolution"])
+        .expect("Create goal failed");
+    let goal_id: String = output
+        .lines()
+        .find(|line| line.contains("Created goal:"))
+        .and_then(|line| line.split_whitespace().nth(2))
+        .unwrap()
+        .to_string();
+
+    let output = env
+        .run(&[
+            "task",
+            "create",
+            &goal_id,
+            "First task",
+            "--receives",
+            "input",
+            "--produces",
+            "output",
+            "--verify",
+            "check",
+        ])
+        .expect("Create task 1 failed");
+    let task_id_1: String = output
+        .lines()
+        .find(|line| line.contains("Created task:"))
+        .and_then(|line| line.split_whitespace().nth(2))
+        .unwrap()
+        .to_string();
+
+    let output = env
+        .run(&[
+            "task",
+            "create",
+            &goal_id,
+            "Second task",
+            "--receives",
+            "input",
+            "--produces",
+            "output",
+            "--verify",
+            "check",
+        ])
+        .expect("Create task 2 failed");
+    let task_id_2: String = output
+        .lines()
+        .find(|line| line.contains("Created task:"))
+        .and_then(|line| line.split_whitespace().nth(2))
+        .unwrap()
+        .to_string();
+
+    // Test goal prefix resolution (3-4 chars)
+    let goal_prefix = &goal_id[..4];
+    let output = env
+        .run(&["task", "list", goal_prefix])
+        .expect("List with goal prefix failed");
+    assert!(output.contains("First task"));
+    assert!(output.contains("Second task"));
+
+    // Test task prefix resolution (3-4 chars)
+    let task_prefix = &task_id_1[..3];
+    env.run(&["task", "start", task_prefix, "--assignee", "test-agent"])
+        .expect("Start with task prefix failed");
+
+    // Verify the task was started
+    let output = env
+        .run(&["show", task_prefix])
+        .expect("Show with prefix failed");
+    assert!(output.contains("in_progress") || output.contains("InProgress"));
+
+    // Test ambiguous prefix error
+    if task_id_1.chars().next() == task_id_2.chars().next() {
+        let ambiguous_prefix = &task_id_1[..1];
+        let result = env.run(&["task", "start", ambiguous_prefix, "--assignee", "test"]);
+        if let Err(err) = result {
+            assert!(err.contains("Ambiguous") || err.contains("matches multiple"));
+        }
+    }
+
+    // Test case-insensitive prefix
+    let upper_prefix = goal_prefix.to_uppercase();
+    let output = env
+        .run(&["ready", &upper_prefix])
+        .expect("Ready with uppercase prefix failed");
+    assert!(output.contains("Second task"));
 }

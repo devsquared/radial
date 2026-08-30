@@ -49,7 +49,7 @@ pub fn analyze(goal: Option<&str>, db: &Database) -> Result<Vec<CompactCandidate
 
 pub fn apply(task_id: &str, summary: String, db: &mut Database) -> Result<String> {
     let base = db.base_path().to_path_buf();
-    let tid: crate::id::TaskId = task_id.parse().map_err(|e| anyhow!("{e}"))?;
+    let tid = db.resolve_task_id(task_id).map_err(|e| anyhow!("{e}"))?;
     let task = db
         .get_task_mut(&tid)
         .ok_or_else(|| anyhow!("Task not found: {task_id}"))?;
