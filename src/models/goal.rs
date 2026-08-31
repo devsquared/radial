@@ -14,11 +14,13 @@ use crate::output::Render;
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, AsRefStr, EnumString)]
 #[serde(rename_all = "lowercase")]
 #[strum(serialize_all = "snake_case")]
+#[non_exhaustive]
 pub enum GoalState {
     Pending,
     InProgress,
     Completed,
     Failed,
+    Cancelled,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -30,9 +32,11 @@ pub struct Metrics {
     task_count: i64,
     tasks_completed: i64,
     tasks_failed: i64,
+    tasks_cancelled: i64,
 }
 
 impl Metrics {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         total_tokens: i64,
         prompt_tokens: i64,
@@ -41,6 +45,7 @@ impl Metrics {
         task_count: i64,
         tasks_completed: i64,
         tasks_failed: i64,
+        tasks_cancelled: i64,
     ) -> Self {
         Self {
             total_tokens,
@@ -50,6 +55,7 @@ impl Metrics {
             task_count,
             tasks_completed,
             tasks_failed,
+            tasks_cancelled,
         }
     }
 
@@ -80,15 +86,26 @@ impl Metrics {
     pub fn tasks_failed(&self) -> i64 {
         self.tasks_failed
     }
+
+    pub fn tasks_cancelled(&self) -> i64 {
+        self.tasks_cancelled
+    }
 }
 
 impl Render for Metrics {
     fn render(&self, w: &mut dyn Write) -> Result<()> {
-        writeln!(
+        write!(
             w,
-            "  Tasks: {} total, {} completed, {} failed",
-            self.task_count, self.tasks_completed, self.tasks_failed
+            "  Tasks: {} total, {} completed",
+            self.task_count, self.tasks_completed
         )?;
+        if self.tasks_cancelled > 0 {
+            write!(w, ", {} cancelled", self.tasks_cancelled)?;
+        }
+        if self.tasks_failed > 0 {
+            write!(w, ", {} failed", self.tasks_failed)?;
+        }
+        writeln!(w)?;
         writeln!(w, "  Tokens: {}", self.total_tokens)?;
         writeln!(w, "  Elapsed: {}ms", self.elapsed_ms)?;
         Ok(())
@@ -179,6 +196,10 @@ impl Goal {
         &self.metrics
     }
 
+    pub fn set_metrics(&mut self, metrics: Metrics) {
+        self.metrics = metrics;
+    }
+
     pub fn set_description(&mut self, description: String) {
         self.description = description;
         self.updated_at = Timestamp::now();
@@ -208,6 +229,11 @@ impl Goal {
 
     pub fn mark_failed(&mut self) {
         self.state = GoalState::Failed;
+        self.updated_at = Timestamp::now();
+    }
+
+    pub fn mark_cancelled(&mut self) {
+        self.state = GoalState::Cancelled;
         self.updated_at = Timestamp::now();
     }
 

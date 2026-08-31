@@ -102,6 +102,11 @@ fn run_goal(goal_cmd: GoalCommands, db: &mut Database) -> Result<()> {
             let goals = commands::goal::list(db);
             output::goal_list(&goals, &RenderOptions::new().json(json))
         }
+        GoalCommands::Cancel { goal_id, reason } => {
+            let goal_id = db.resolve_goal_id(&goal_id).map_err(|e| anyhow!("{e}"))?;
+            let (goal, cancelled_task_ids) = commands::goal::cancel(&goal_id, reason, "cli", db)?;
+            output::goal_cancelled(&goal, &cancelled_task_ids)
+        }
     }
 }
 
@@ -185,6 +190,15 @@ fn run_task(task_cmd: TaskCommands, db: &mut Database) -> Result<()> {
             let task_id = db.resolve_any_task(&task_id).map_err(|e| anyhow!("{e}"))?;
             let task = commands::task::fail(&task_id, reason, compact, db)?;
             output::task_failed(&task)
+        }
+        TaskCommands::Cancel {
+            task_id,
+            reason,
+            cascade,
+        } => {
+            let task_id = db.resolve_any_task(&task_id).map_err(|e| anyhow!("{e}"))?;
+            let result = commands::task::cancel(&task_id, reason, "cli", cascade, db)?;
+            output::task_cancelled(&result)
         }
         TaskCommands::Retry { task_id } => {
             let task_id = db.resolve_any_task(&task_id).map_err(|e| anyhow!("{e}"))?;

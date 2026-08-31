@@ -454,6 +454,13 @@ impl Database {
                 .count(),
         )
         .unwrap_or(0);
+        let tasks_cancelled = i64::try_from(
+            tasks
+                .iter()
+                .filter(|t| t.state() == TaskState::Cancelled)
+                .count(),
+        )
+        .unwrap_or(0);
 
         Metrics::new(
             total_tokens,
@@ -463,6 +470,7 @@ impl Database {
             task_count,
             tasks_completed,
             tasks_failed,
+            tasks_cancelled,
         )
     }
 
@@ -639,10 +647,28 @@ impl Database {
 }
 
 /// Derive the aggregate state of a parent task from its subtasks' states.
+///
+/// Cancelled subtasks count as "resolved" — they don't block parent completion.
+/// A parent whose subtasks are all resolved (Completed or Cancelled) derives:
+/// - Completed if at least one subtask completed
+/// - Cancelled if all subtasks were cancelled (none completed)
 fn derive_parent_state(subtask_states: &[TaskState]) -> TaskState {
-    if subtask_states.iter().all(|s| *s == TaskState::Completed) {
-        return TaskState::Completed;
+    // Check if all subtasks are resolved (completed or cancelled)
+    let all_resolved = subtask_states
+        .iter()
+        .all(|s| matches!(s, TaskState::Completed | TaskState::Cancelled));
+
+    if all_resolved {
+        let any_completed = subtask_states.contains(&TaskState::Completed);
+        return if any_completed {
+            TaskState::Completed
+        } else {
+            // All cancelled, none completed
+            TaskState::Cancelled
+        };
     }
+
+    // Not all resolved — check for active work
     let any_active = subtask_states
         .iter()
         .any(|s| matches!(s, TaskState::InProgress | TaskState::Verifying));
@@ -650,9 +676,11 @@ fn derive_parent_state(subtask_states: &[TaskState]) -> TaskState {
     if any_active || any_completed {
         return TaskState::InProgress;
     }
+
     if subtask_states.contains(&TaskState::Failed) {
         return TaskState::Failed;
     }
+
     TaskState::Pending
 }
 

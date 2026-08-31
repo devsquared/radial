@@ -123,6 +123,16 @@ pub enum GoalCommands {
         #[arg(long)]
         json: bool,
     },
+
+    /// Cancel a goal and all its non-terminal tasks
+    Cancel {
+        /// The goal ID to cancel
+        goal_id: String,
+
+        /// Reason for cancellation
+        #[arg(long)]
+        reason: Option<String>,
+    },
 }
 
 #[derive(Subcommand)]
@@ -238,6 +248,20 @@ pub enum TaskCommands {
         /// Compact the task immediately using the reason as its summary
         #[arg(long, requires = "reason")]
         compact: bool,
+    },
+
+    /// Cancel a task that is no longer needed
+    Cancel {
+        /// The task ID to cancel
+        task_id: String,
+
+        /// Reason for cancellation
+        #[arg(long)]
+        reason: Option<String>,
+
+        /// Cascade cancellation to all downstream dependent tasks
+        #[arg(long)]
+        cascade: bool,
     },
 
     /// Retry a failed task
