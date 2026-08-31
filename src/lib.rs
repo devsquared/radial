@@ -255,9 +255,17 @@ pub fn run(cli: Cli) -> Result<()> {
             let (mut db, _guard) = ensure_initialized_for_write()?;
             run_goal(goal_cmd, &mut db)
         }
-        Commands::List { json, full } => {
+        Commands::List {
+            json,
+            full,
+            archived,
+        } => {
             let (db, _guard) = ensure_initialized_for_read()?;
-            let results = commands::list::run(&db)?;
+            let results = if archived {
+                commands::list::run_archived(&db)?
+            } else {
+                commands::list::run(&db)?
+            };
             output::list(&results, &RenderOptions::new().json(json).full(full))
         }
         Commands::Task(task_cmd) => {
@@ -320,9 +328,14 @@ pub fn run(cli: Cli) -> Result<()> {
             let result = commands::show::run(&id, &db)?;
             output::show(&result, &RenderOptions::new().json(json))
         }
-        Commands::Clean { all, force } => {
+        Commands::Clean { all, force, purge } => {
             let (mut db, _guard) = ensure_initialized_for_write()?;
-            commands::clean::run(all, force, &mut db)
+            commands::clean::run(all, force, purge, &mut db)
+        }
+        Commands::Restore { goal_id } => {
+            let (mut db, _guard) = ensure_initialized_for_write()?;
+            let goal = commands::restore::run(&goal_id, &mut db)?;
+            output::goal_restored(&goal)
         }
         Commands::Ready {
             goal_id,

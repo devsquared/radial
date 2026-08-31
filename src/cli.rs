@@ -33,6 +33,10 @@ pub enum Commands {
         /// Show full descriptions without truncating
         #[arg(long)]
         full: bool,
+
+        /// Show archived goals instead of active goals
+        #[arg(long)]
+        archived: bool,
     },
 
     /// Manage tasks
@@ -62,6 +66,16 @@ pub enum Commands {
         /// Remove all goals regardless of status
         #[arg(long)]
         force: bool,
+
+        /// Permanently delete instead of archiving
+        #[arg(long)]
+        purge: bool,
+    },
+
+    /// Restore an archived goal
+    Restore {
+        /// Goal ID to restore from archive
+        goal_id: String,
     },
 
     /// Show status of goals and tasks

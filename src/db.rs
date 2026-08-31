@@ -219,6 +219,11 @@ impl Database {
                 continue;
             }
 
+            // Skip archive directory
+            if path.file_name() == Some(std::ffi::OsStr::new("archive")) {
+                continue;
+            }
+
             let goal_toml_path = path.join("goal.toml");
             if !goal_toml_path.exists() {
                 continue;
@@ -296,6 +301,41 @@ impl Database {
         goals
     }
 
+    pub fn list_archived_goals(&self) -> Result<Vec<Goal>> {
+        let archive_dir = self.path.join("archive");
+        if !archive_dir.exists() {
+            return Ok(Vec::new());
+        }
+
+        let mut archived_goals = Vec::new();
+        let dir = fs::read_dir(&archive_dir).context("Failed to read archive directory")?;
+
+        for entry in dir {
+            let entry = entry.context("Failed to read archive entry")?;
+            let path = entry.path();
+
+            if !path.is_dir() {
+                continue;
+            }
+
+            let goal_toml_path = path.join("goal.toml");
+            if !goal_toml_path.exists() {
+                continue;
+            }
+
+            let goal_content = fs::read_to_string(&goal_toml_path)
+                .with_context(|| format!("Failed to read {}", goal_toml_path.display()))?;
+            let mut goal: Goal = toml::from_str(&goal_content)
+                .with_context(|| format!("Failed to parse {}", goal_toml_path.display()))?;
+
+            goal.compute_display_ref();
+            archived_goals.push(goal);
+        }
+
+        archived_goals.sort_by_key(|g| std::cmp::Reverse(g.created_at()));
+        Ok(archived_goals)
+    }
+
     /// Compute the next seq number for a new goal.
     /// Returns max(existing seq) + 1, or 1 if no goals have seq assigned.
     pub fn next_goal_seq(&self) -> u32 {
@@ -323,6 +363,71 @@ impl Database {
         }
 
         Ok(())
+    }
+
+    pub fn archive_goal(&mut self, goal_id: &GoalId) -> Result<()> {
+        // Remove tasks from memory
+        self.tasks.retain(|_, t| t.goal_id() != goal_id);
+
+        // Remove goal from memory
+        self.goals.remove(goal_id);
+
+        // Move the goal directory to archive/
+        let goal_dir = self.path.join(goal_id.as_ref());
+        if goal_dir.exists() {
+            let archive_dir = self.path.join("archive");
+            fs::create_dir_all(&archive_dir).context("Failed to create archive directory")?;
+
+            let archive_goal_dir = archive_dir.join(goal_id.as_ref());
+            fs::rename(&goal_dir, &archive_goal_dir).with_context(|| {
+                format!(
+                    "Failed to move goal {} to archive: {} -> {}",
+                    goal_id,
+                    goal_dir.display(),
+                    archive_goal_dir.display()
+                )
+            })?;
+        }
+
+        Ok(())
+    }
+
+    pub fn restore_goal(&mut self, goal_id: &GoalId) -> Result<()> {
+        // Move the goal directory from archive/ back to .radial/
+        let archive_dir = self.path.join("archive");
+        let archive_goal_dir = archive_dir.join(goal_id.as_ref());
+
+        if !archive_goal_dir.exists() {
+            bail!("Goal {goal_id} not found in archive");
+        }
+
+        let goal_dir = self.path.join(goal_id.as_ref());
+        if goal_dir.exists() {
+            bail!(
+                "Cannot restore {goal_id}: goal directory already exists at {}",
+                goal_dir.display()
+            );
+        }
+
+        fs::rename(&archive_goal_dir, &goal_dir).with_context(|| {
+            format!(
+                "Failed to restore goal {} from archive: {} -> {}",
+                goal_id,
+                archive_goal_dir.display(),
+                goal_dir.display()
+            )
+        })?;
+
+        Ok(())
+    }
+
+    pub fn reload(&mut self) -> Result<()> {
+        // Clear existing state
+        self.goals.clear();
+        self.tasks.clear();
+
+        // Reload from disk
+        self.load()
     }
 
     // Task operations

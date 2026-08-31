@@ -6,11 +6,11 @@ use console::style;
 use crate::db::Database;
 use crate::models::GoalState;
 
-pub fn run(all: bool, force: bool, db: &mut Database) -> Result<()> {
+pub fn run(all: bool, force: bool, purge: bool, db: &mut Database) -> Result<()> {
     let goals: Vec<_> = db
         .list_goals()
         .into_iter()
-        .filter(|g| force || g.state() == GoalState::Completed)
+        .filter(|g| force || g.state() == GoalState::Completed || g.state() == GoalState::Cancelled)
         .cloned()
         .collect();
 
@@ -18,7 +18,7 @@ pub fn run(all: bool, force: bool, db: &mut Database) -> Result<()> {
         let msg = if force {
             "No goals found."
         } else {
-            "No completed goals to clean."
+            "No completed or cancelled goals to clean."
         };
         println!("{msg}");
         return Ok(());
@@ -28,30 +28,43 @@ pub fn run(all: bool, force: bool, db: &mut Database) -> Result<()> {
 
     for goal in &goals {
         // --all or --force skip prompting
-        let should_remove = all || force || prompt_for_goal(goal)?;
+        let should_remove = all || force || prompt_for_goal(goal, purge)?;
 
         if should_remove {
-            db.delete_goal(goal.id())?;
-            println!(
-                "  {} {} — {}",
-                style("Removed").red(),
-                style(goal.id()).cyan(),
-                truncate(goal.description(), 60),
-            );
+            if purge {
+                db.delete_goal(goal.id())?;
+                println!(
+                    "  {} {} — {}",
+                    style("Deleted").red(),
+                    style(goal.id()).cyan(),
+                    truncate(goal.description(), 60),
+                );
+            } else {
+                db.archive_goal(goal.id())?;
+                println!(
+                    "  {} {} — {}",
+                    style("Archived").dim(),
+                    style(goal.id()).cyan(),
+                    truncate(goal.description(), 60),
+                );
+            }
             removed += 1;
         }
     }
 
-    println!("\nCleaned {} goal(s).", style(removed).bold());
+    let action = if purge { "Deleted" } else { "Archived" };
+    println!("\n{} {} goal(s).", action, style(removed).bold());
     Ok(())
 }
 
-/// Prompt the user to confirm deletion of a single goal.
-fn prompt_for_goal(goal: &crate::models::Goal) -> Result<bool> {
+/// Prompt the user to confirm archiving or deletion of a single goal.
+fn prompt_for_goal(goal: &crate::models::Goal, purge: bool) -> Result<bool> {
     let mut stdout = io::stdout().lock();
+    let action = if purge { "Delete" } else { "Archive" };
     write!(
         stdout,
-        "Remove {} [{}] {}? [y/N] ",
+        "{} {} [{}] {}? [y/N] ",
+        action,
         style(goal.id()).cyan().bold(),
         style(goal.state().as_ref()).dim(),
         truncate(goal.description(), 50),

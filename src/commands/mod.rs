@@ -8,6 +8,7 @@ pub mod init;
 pub mod list;
 pub mod prep;
 pub mod ready;
+pub mod restore;
 pub mod show;
 pub mod status;
 pub mod task;
