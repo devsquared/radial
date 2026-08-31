@@ -2475,3 +2475,85 @@ fn test_prefix_resolution() {
         .expect("Ready with uppercase prefix failed");
     assert!(output.contains("Second task"));
 }
+
+#[test]
+fn test_display_ref_usage() {
+    let env = TestEnv::new();
+    env.run(&["init"]).expect("Init failed");
+
+    // Create first goal
+    env.run(&["goal", "create", "First goal"])
+        .expect("Create first goal failed");
+
+    // Create second goal
+    env.run(&["goal", "create", "Second goal"])
+        .expect("Create second goal failed");
+
+    // Create tasks for first goal using display ref g1
+    env.run(&["task", "create", "g1", "Task 1 for goal 1"])
+        .expect("Create task with display ref failed");
+
+    env.run(&["task", "create", "g1", "Task 2 for goal 1"])
+        .expect("Create second task with display ref failed");
+
+    // Create task for second goal using display ref g2
+    env.run(&["task", "create", "g2", "Task 1 for goal 2"])
+        .expect("Create task for goal 2 failed");
+
+    // Test rd show with goal display refs
+    let output = env
+        .run(&["show", "g1"])
+        .expect("Show goal with display ref failed");
+    assert!(output.contains("First goal"));
+
+    let output = env
+        .run(&["show", "g2"])
+        .expect("Show goal 2 with display ref failed");
+    assert!(output.contains("Second goal"));
+
+    // Test rd show with task display refs
+    let output = env
+        .run(&["show", "g1.1"])
+        .expect("Show task with display ref failed");
+    assert!(output.contains("Task 1 for goal 1"));
+
+    let output = env
+        .run(&["show", "g1.2"])
+        .expect("Show task 2 with display ref failed");
+    assert!(output.contains("Task 2 for goal 1"));
+
+    let output = env
+        .run(&["show", "g2.1"])
+        .expect("Show task for goal 2 failed");
+    assert!(output.contains("Task 1 for goal 2"));
+
+    // Test rd list output shows display refs
+    let output = env.run(&["list"]).expect("List failed");
+    assert!(output.contains("g1"));
+    assert!(output.contains("g2"));
+
+    // Test task edit with display refs
+    env.run(&[
+        "edit",
+        "task",
+        "g1.1",
+        "--description",
+        "Updated task description",
+    ])
+    .expect("Edit task with display ref failed");
+
+    let output = env.run(&["show", "g1.1"]).expect("Show edited task failed");
+    assert!(output.contains("Updated task description"));
+
+    // Test JSON output includes ref field
+    let output = env
+        .run(&["goal", "list", "--json"])
+        .expect("Goal list JSON failed");
+    assert!(output.contains("\"ref\":"));
+    assert!(output.contains("\"g1\""));
+    assert!(output.contains("\"g2\""));
+
+    // Test that task JSON includes ref field
+    let output = env.run(&["list", "--json"]).expect("List JSON failed");
+    assert!(output.contains("\"ref\":"));
+}

@@ -99,6 +99,7 @@ mod tests {
             TaskId::from(id.to_string()),
             GoalId::from("g1".to_string()),
             None,
+            None,
             "test".to_string(),
             Priority::default(),
             None,

@@ -226,10 +226,14 @@ impl Database {
 
             let goal_content = fs::read_to_string(&goal_toml_path)
                 .with_context(|| format!("Failed to read {}", goal_toml_path.display()))?;
-            let goal: Goal = toml::from_str(&goal_content)
+            let mut goal: Goal = toml::from_str(&goal_content)
                 .with_context(|| format!("Failed to parse {}", goal_toml_path.display()))?;
 
+            // Compute display_ref_field after deserialization
+            goal.compute_display_ref();
+
             let goal_id = goal.id().clone();
+            let goal_seq = goal.seq().unwrap_or(0);
             self.goals.insert(goal_id, goal);
 
             let task_dir = fs::read_dir(&path)
@@ -249,8 +253,11 @@ impl Database {
 
                 let task_content = fs::read_to_string(&task_path)
                     .with_context(|| format!("Failed to read {}", task_path.display()))?;
-                let task: Task = toml::from_str(&task_content)
+                let mut task: Task = toml::from_str(&task_content)
                     .with_context(|| format!("Failed to parse {}", task_path.display()))?;
+
+                // Compute display_ref_field after deserialization
+                task.compute_display_ref(goal_seq);
 
                 self.tasks.insert(task.id().clone(), task);
             }
@@ -287,6 +294,16 @@ impl Database {
         let mut goals: Vec<&Goal> = self.goals.values().collect();
         goals.sort_by_key(|g| std::cmp::Reverse(g.created_at()));
         goals
+    }
+
+    /// Compute the next seq number for a new goal.
+    /// Returns max(existing seq) + 1, or 1 if no goals have seq assigned.
+    pub fn next_goal_seq(&self) -> u32 {
+        self.goals
+            .values()
+            .filter_map(Goal::seq)
+            .max()
+            .map_or(1, |max| max + 1)
     }
 
     /// Delete a goal and all its tasks from disk and memory.
@@ -405,6 +422,17 @@ impl Database {
         tasks
     }
 
+    /// Compute the next seq number for a new task in the given goal.
+    /// Returns max(existing seq for this goal's tasks) + 1, or 1 if no tasks have seq assigned.
+    pub fn next_task_seq(&self, goal_id: &GoalId) -> u32 {
+        self.tasks
+            .values()
+            .filter(|t| t.goal_id() == goal_id)
+            .filter_map(Task::seq)
+            .max()
+            .map_or(1, |max| max + 1)
+    }
+
     #[allow(clippy::missing_panics_doc)]
     pub fn compute_goal_metrics(&self, goal_id: &GoalId) -> Metrics {
         let tasks = self.list_tasks(goal_id);
@@ -511,6 +539,103 @@ impl Database {
             }
         }
     }
+
+    /// Resolve a goal from a display ref (e.g., "g1", "g10").
+    /// Returns `NotFound` if the display ref is malformed or no goal has that seq.
+    pub fn resolve_goal_display_ref(&self, input: &str) -> Result<GoalId, ResolveError> {
+        let input = input.trim();
+        if !input.starts_with('g') {
+            return Err(ResolveError::NotFound {
+                input: input.to_string(),
+                suggestion: None,
+            });
+        }
+
+        let seq_str = &input[1..];
+        let seq: u32 = seq_str.parse().map_err(|_| ResolveError::NotFound {
+            input: input.to_string(),
+            suggestion: None,
+        })?;
+
+        self.goals
+            .values()
+            .find(|g| g.seq() == Some(seq))
+            .map(|g| g.id().clone())
+            .ok_or_else(|| ResolveError::NotFound {
+                input: input.to_string(),
+                suggestion: None,
+            })
+    }
+
+    /// Resolve a task from a display ref (e.g., "g1.2", "g10.5").
+    /// Returns `NotFound` if the display ref is malformed or no task matches.
+    pub fn resolve_task_display_ref(&self, input: &str) -> Result<TaskId, ResolveError> {
+        let input = input.trim();
+        if !input.starts_with('g') {
+            return Err(ResolveError::NotFound {
+                input: input.to_string(),
+                suggestion: None,
+            });
+        }
+
+        let parts: Vec<&str> = input[1..].split('.').collect();
+        if parts.len() != 2 {
+            return Err(ResolveError::NotFound {
+                input: input.to_string(),
+                suggestion: None,
+            });
+        }
+
+        let goal_seq: u32 = parts[0].parse().map_err(|_| ResolveError::NotFound {
+            input: input.to_string(),
+            suggestion: None,
+        })?;
+        let task_seq: u32 = parts[1].parse().map_err(|_| ResolveError::NotFound {
+            input: input.to_string(),
+            suggestion: None,
+        })?;
+
+        let goal = self
+            .goals
+            .values()
+            .find(|g| g.seq() == Some(goal_seq))
+            .ok_or_else(|| ResolveError::NotFound {
+                input: input.to_string(),
+                suggestion: None,
+            })?;
+
+        self.tasks
+            .values()
+            .find(|t| t.goal_id() == goal.id() && t.seq() == Some(task_seq))
+            .map(|t| t.id().clone())
+            .ok_or_else(|| ResolveError::NotFound {
+                input: input.to_string(),
+                suggestion: None,
+            })
+    }
+
+    /// Resolve a goal from either a display ref or a nanoid prefix.
+    /// Tries display ref first (e.g., "g1"), then falls back to nanoid prefix resolution.
+    pub fn resolve_any_goal(&self, input: &str) -> Result<GoalId, ResolveError> {
+        if input.trim().starts_with('g')
+            && let Ok(id) = self.resolve_goal_display_ref(input)
+        {
+            return Ok(id);
+        }
+        self.resolve_goal_id(input)
+    }
+
+    /// Resolve a task from either a display ref or a nanoid prefix.
+    /// Tries display ref first (e.g., "g1.2"), then falls back to nanoid prefix resolution.
+    pub fn resolve_any_task(&self, input: &str) -> Result<TaskId, ResolveError> {
+        if input.trim().starts_with('g')
+            && input.contains('.')
+            && let Ok(id) = self.resolve_task_display_ref(input)
+        {
+            return Ok(id);
+        }
+        self.resolve_task_id(input)
+    }
 }
 
 /// Derive the aggregate state of a parent task from its subtasks' states.
@@ -552,6 +677,7 @@ mod tests {
         let now = Timestamp::now();
         Goal::new(
             goal_id(id),
+            None,
             "test goal".to_string(),
             GoalState::Pending,
             now,
@@ -566,6 +692,7 @@ mod tests {
         Task::new(
             task_id(id),
             goal_id(gid),
+            None,
             None,
             "test task".to_string(),
             Priority::default(),
@@ -698,6 +825,7 @@ mod tests {
         let ts2 = Timestamp::from_millisecond(2_000_000).unwrap();
         let g1 = Goal::new(
             goal_id("g1"),
+            None,
             "test goal".to_string(),
             GoalState::Pending,
             ts1,
@@ -707,6 +835,7 @@ mod tests {
         );
         let g2 = Goal::new(
             goal_id("g2"),
+            None,
             "test goal".to_string(),
             GoalState::Pending,
             ts2,
@@ -789,6 +918,7 @@ mod tests {
             task_id("t1"),
             goal_id("g1"),
             None,
+            None,
             "test task".to_string(),
             Priority::default(),
             None,
@@ -800,6 +930,7 @@ mod tests {
         let t2 = Task::new(
             task_id("t2"),
             goal_id("g1"),
+            None,
             None,
             "test task".to_string(),
             Priority::default(),
@@ -1045,6 +1176,7 @@ mod tests {
         let (_dir, db) = &mut db;
         let goal1 = Goal::new(
             goal_id("abc12345"),
+            None,
             "Test goal".to_string(),
             GoalState::Pending,
             Timestamp::now(),
@@ -1064,6 +1196,7 @@ mod tests {
         let (_dir, db) = &mut db;
         let goal1 = Goal::new(
             goal_id("abc12345"),
+            None,
             "Test goal".to_string(),
             GoalState::Pending,
             Timestamp::now(),
@@ -1083,6 +1216,7 @@ mod tests {
         let (_dir, db) = &mut db;
         let goal1 = Goal::new(
             goal_id("abc12345"),
+            None,
             "Test goal 1".to_string(),
             GoalState::Pending,
             Timestamp::now(),
@@ -1092,6 +1226,7 @@ mod tests {
         );
         let goal2 = Goal::new(
             goal_id("abc67890"),
+            None,
             "Test goal 2".to_string(),
             GoalState::Pending,
             Timestamp::now(),
@@ -1133,6 +1268,7 @@ mod tests {
         let (_dir, db) = &mut db;
         let goal1 = Goal::new(
             goal_id("abc12345"),
+            None,
             "Test goal".to_string(),
             GoalState::Pending,
             Timestamp::now(),
@@ -1152,6 +1288,7 @@ mod tests {
         let (_dir, db) = &mut db;
         let goal = Goal::new(
             goal_id("g1"),
+            None,
             "Test goal".to_string(),
             GoalState::Pending,
             Timestamp::now(),
@@ -1164,6 +1301,7 @@ mod tests {
         let task = crate::models::Task::new(
             task_id("t8zwarp9"),
             goal_id("g1"),
+            None,
             None,
             "Test task".to_string(),
             Priority::default(),
@@ -1185,6 +1323,7 @@ mod tests {
         let (_dir, db) = &mut db;
         let goal = Goal::new(
             goal_id("g1"),
+            None,
             "Test goal".to_string(),
             GoalState::Pending,
             Timestamp::now(),
@@ -1198,6 +1337,7 @@ mod tests {
             task_id("t8zwarp9"),
             goal_id("g1"),
             None,
+            None,
             "Test task 1".to_string(),
             Priority::default(),
             None,
@@ -1209,6 +1349,7 @@ mod tests {
         let task2 = crate::models::Task::new(
             task_id("t8zfoo12"),
             goal_id("g1"),
+            None,
             None,
             "Test task 2".to_string(),
             Priority::default(),
@@ -1230,5 +1371,367 @@ mod tests {
             }
             super::ResolveError::NotFound { .. } => panic!("Expected Ambiguous error"),
         }
+    }
+
+    #[rstest]
+    fn next_goal_seq_empty_db(db: (TempDir, Database)) {
+        let (_dir, db) = db;
+        assert_eq!(db.next_goal_seq(), 1);
+    }
+
+    #[rstest]
+    fn next_goal_seq_with_existing_goals(mut db: (TempDir, Database)) {
+        let (_dir, db) = &mut db;
+        let g1 = Goal::new(
+            goal_id("g1"),
+            Some(1),
+            "Test goal 1".to_string(),
+            crate::models::GoalState::Pending,
+            Timestamp::now(),
+            Timestamp::now(),
+            None,
+            Metrics::default(),
+        );
+        let g2 = Goal::new(
+            goal_id("g2"),
+            Some(3),
+            "Test goal 2".to_string(),
+            crate::models::GoalState::Pending,
+            Timestamp::now(),
+            Timestamp::now(),
+            None,
+            Metrics::default(),
+        );
+        db.create_goal(g1).unwrap();
+        db.create_goal(g2).unwrap();
+
+        assert_eq!(db.next_goal_seq(), 4);
+    }
+
+    #[rstest]
+    fn next_goal_seq_with_gaps(mut db: (TempDir, Database)) {
+        let (_dir, db) = &mut db;
+        let g1 = Goal::new(
+            goal_id("g1"),
+            Some(1),
+            "Test goal 1".to_string(),
+            crate::models::GoalState::Pending,
+            Timestamp::now(),
+            Timestamp::now(),
+            None,
+            Metrics::default(),
+        );
+        let g2 = Goal::new(
+            goal_id("g2"),
+            Some(5),
+            "Test goal 2".to_string(),
+            crate::models::GoalState::Pending,
+            Timestamp::now(),
+            Timestamp::now(),
+            None,
+            Metrics::default(),
+        );
+        db.create_goal(g1).unwrap();
+        db.create_goal(g2).unwrap();
+
+        assert_eq!(db.next_goal_seq(), 6);
+    }
+
+    #[rstest]
+    fn next_task_seq_empty_goal(mut db: (TempDir, Database)) {
+        let (_dir, db) = &mut db;
+        let goal = make_goal("g1");
+        db.create_goal(goal).unwrap();
+
+        assert_eq!(db.next_task_seq(&goal_id("g1")), 1);
+    }
+
+    #[rstest]
+    fn next_task_seq_with_existing_tasks(mut db: (TempDir, Database)) {
+        let (_dir, db) = &mut db;
+        let goal = make_goal("g1");
+        db.create_goal(goal).unwrap();
+
+        let t1 = Task::new(
+            task_id("t1"),
+            goal_id("g1"),
+            Some(1),
+            None,
+            "Test task 1".to_string(),
+            Priority::default(),
+            None,
+            TaskState::Pending,
+            vec![],
+            Timestamp::now(),
+            Timestamp::now(),
+        );
+        let t2 = Task::new(
+            task_id("t2"),
+            goal_id("g1"),
+            Some(2),
+            None,
+            "Test task 2".to_string(),
+            Priority::default(),
+            None,
+            TaskState::Pending,
+            vec![],
+            Timestamp::now(),
+            Timestamp::now(),
+        );
+        db.create_task(t1).unwrap();
+        db.create_task(t2).unwrap();
+
+        assert_eq!(db.next_task_seq(&goal_id("g1")), 3);
+    }
+
+    #[rstest]
+    fn next_task_seq_isolated_per_goal(mut db: (TempDir, Database)) {
+        let (_dir, db) = &mut db;
+        db.create_goal(make_goal("g1")).unwrap();
+        db.create_goal(make_goal("g2")).unwrap();
+
+        let t1 = Task::new(
+            task_id("t1"),
+            goal_id("g1"),
+            Some(1),
+            None,
+            "Test task 1".to_string(),
+            Priority::default(),
+            None,
+            TaskState::Pending,
+            vec![],
+            Timestamp::now(),
+            Timestamp::now(),
+        );
+        let t2 = Task::new(
+            task_id("t2"),
+            goal_id("g2"),
+            Some(1),
+            None,
+            "Test task 2".to_string(),
+            Priority::default(),
+            None,
+            TaskState::Pending,
+            vec![],
+            Timestamp::now(),
+            Timestamp::now(),
+        );
+        db.create_task(t1).unwrap();
+        db.create_task(t2).unwrap();
+
+        assert_eq!(db.next_task_seq(&goal_id("g1")), 2);
+        assert_eq!(db.next_task_seq(&goal_id("g2")), 2);
+    }
+
+    #[rstest]
+    fn resolve_goal_display_ref_valid(mut db: (TempDir, Database)) {
+        let (_dir, db) = &mut db;
+        let goal = Goal::new(
+            goal_id("abc123"),
+            Some(5),
+            "Test goal".to_string(),
+            crate::models::GoalState::Pending,
+            Timestamp::now(),
+            Timestamp::now(),
+            None,
+            Metrics::default(),
+        );
+        db.create_goal(goal).unwrap();
+
+        let result = db.resolve_goal_display_ref("g5");
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap().as_ref(), "abc123");
+    }
+
+    #[rstest]
+    fn resolve_goal_display_ref_not_found(mut db: (TempDir, Database)) {
+        let (_dir, db) = &mut db;
+        let goal = Goal::new(
+            goal_id("abc123"),
+            Some(5),
+            "Test goal".to_string(),
+            crate::models::GoalState::Pending,
+            Timestamp::now(),
+            Timestamp::now(),
+            None,
+            Metrics::default(),
+        );
+        db.create_goal(goal).unwrap();
+
+        let result = db.resolve_goal_display_ref("g10");
+        assert!(result.is_err());
+        assert!(matches!(
+            result.unwrap_err(),
+            super::ResolveError::NotFound { .. }
+        ));
+    }
+
+    #[rstest]
+    fn resolve_goal_display_ref_invalid_format(db: (TempDir, Database)) {
+        let (_dir, db) = db;
+        let result = db.resolve_goal_display_ref("invalid");
+        assert!(result.is_err());
+        assert!(matches!(
+            result.unwrap_err(),
+            super::ResolveError::NotFound { .. }
+        ));
+    }
+
+    #[rstest]
+    fn resolve_task_display_ref_valid(mut db: (TempDir, Database)) {
+        let (_dir, db) = &mut db;
+        let goal = Goal::new(
+            goal_id("g1"),
+            Some(3),
+            "Test goal".to_string(),
+            crate::models::GoalState::Pending,
+            Timestamp::now(),
+            Timestamp::now(),
+            None,
+            Metrics::default(),
+        );
+        db.create_goal(goal).unwrap();
+
+        let task = Task::new(
+            task_id("t1"),
+            goal_id("g1"),
+            Some(7),
+            None,
+            "Test task".to_string(),
+            Priority::default(),
+            None,
+            TaskState::Pending,
+            vec![],
+            Timestamp::now(),
+            Timestamp::now(),
+        );
+        db.create_task(task).unwrap();
+
+        let result = db.resolve_task_display_ref("g3.7");
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap().as_ref(), "t1");
+    }
+
+    #[rstest]
+    fn resolve_task_display_ref_not_found(mut db: (TempDir, Database)) {
+        let (_dir, db) = &mut db;
+        let goal = Goal::new(
+            goal_id("g1"),
+            Some(3),
+            "Test goal".to_string(),
+            crate::models::GoalState::Pending,
+            Timestamp::now(),
+            Timestamp::now(),
+            None,
+            Metrics::default(),
+        );
+        db.create_goal(goal).unwrap();
+
+        let result = db.resolve_task_display_ref("g3.10");
+        assert!(result.is_err());
+        assert!(matches!(
+            result.unwrap_err(),
+            super::ResolveError::NotFound { .. }
+        ));
+    }
+
+    #[rstest]
+    fn resolve_any_goal_display_ref_wins(mut db: (TempDir, Database)) {
+        let (_dir, db) = &mut db;
+        let goal = Goal::new(
+            goal_id("g1234567"),
+            Some(1),
+            "Test goal".to_string(),
+            crate::models::GoalState::Pending,
+            Timestamp::now(),
+            Timestamp::now(),
+            None,
+            Metrics::default(),
+        );
+        db.create_goal(goal).unwrap();
+
+        let result = db.resolve_any_goal("g1");
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap().as_ref(), "g1234567");
+    }
+
+    #[rstest]
+    fn resolve_any_goal_falls_back_to_nanoid(mut db: (TempDir, Database)) {
+        let (_dir, db) = &mut db;
+        let goal = Goal::new(
+            goal_id("abc12345"),
+            Some(5),
+            "Test goal".to_string(),
+            crate::models::GoalState::Pending,
+            Timestamp::now(),
+            Timestamp::now(),
+            None,
+            Metrics::default(),
+        );
+        db.create_goal(goal).unwrap();
+
+        let result = db.resolve_any_goal("abc");
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap().as_ref(), "abc12345");
+    }
+
+    #[rstest]
+    fn resolve_any_task_display_ref_wins(mut db: (TempDir, Database)) {
+        let (_dir, db) = &mut db;
+        let goal = Goal::new(
+            goal_id("g1"),
+            Some(2),
+            "Test goal".to_string(),
+            crate::models::GoalState::Pending,
+            Timestamp::now(),
+            Timestamp::now(),
+            None,
+            Metrics::default(),
+        );
+        db.create_goal(goal).unwrap();
+
+        let task = Task::new(
+            task_id("t8zwarp9"),
+            goal_id("g1"),
+            Some(3),
+            None,
+            "Test task".to_string(),
+            Priority::default(),
+            None,
+            TaskState::Pending,
+            vec![],
+            Timestamp::now(),
+            Timestamp::now(),
+        );
+        db.create_task(task).unwrap();
+
+        let result = db.resolve_any_task("g2.3");
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap().as_ref(), "t8zwarp9");
+    }
+
+    #[rstest]
+    fn resolve_any_task_falls_back_to_nanoid(mut db: (TempDir, Database)) {
+        let (_dir, db) = &mut db;
+        db.create_goal(make_goal("g1")).unwrap();
+
+        let task = Task::new(
+            task_id("t8zwarp9"),
+            goal_id("g1"),
+            Some(3),
+            None,
+            "Test task".to_string(),
+            Priority::default(),
+            None,
+            TaskState::Pending,
+            vec![],
+            Timestamp::now(),
+            Timestamp::now(),
+        );
+        db.create_task(task).unwrap();
+
+        let result = db.resolve_any_task("t8z");
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap().as_ref(), "t8zwarp9");
     }
 }

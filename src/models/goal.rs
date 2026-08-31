@@ -98,6 +98,14 @@ impl Render for Metrics {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Goal {
     id: GoalId,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    seq: Option<u32>,
+    #[serde(
+        rename = "ref",
+        skip_deserializing,
+        skip_serializing_if = "Option::is_none"
+    )]
+    display_ref_field: Option<String>,
     description: String,
     state: GoalState,
     created_at: Timestamp,
@@ -108,8 +116,10 @@ pub struct Goal {
 }
 
 impl Goal {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         id: GoalId,
+        seq: Option<u32>,
         description: String,
         state: GoalState,
         created_at: Timestamp,
@@ -117,8 +127,11 @@ impl Goal {
         completed_at: Option<Timestamp>,
         metrics: Metrics,
     ) -> Self {
+        let display_ref_field = seq.map(|s| format!("g{s}"));
         Self {
             id,
+            seq,
+            display_ref_field,
             description,
             state,
             created_at,
@@ -130,6 +143,16 @@ impl Goal {
 
     pub fn id(&self) -> &GoalId {
         &self.id
+    }
+
+    pub fn seq(&self) -> Option<u32> {
+        self.seq
+    }
+
+    /// Returns the display reference for this goal (e.g., "g1").
+    /// Returns None if seq is not assigned (legacy records).
+    pub fn display_ref(&self) -> Option<String> {
+        self.display_ref_field.clone()
     }
 
     pub fn description(&self) -> &str {
@@ -163,6 +186,12 @@ impl Goal {
 
     pub fn touch(&mut self) {
         self.updated_at = Timestamp::now();
+    }
+
+    /// Compute and set the `display_ref_field` based on the `seq`.
+    /// Called after deserialization to populate the computed field.
+    pub fn compute_display_ref(&mut self) {
+        self.display_ref_field = self.seq.map(|s| format!("g{s}"));
     }
 
     pub fn mark_in_progress(&mut self) {
@@ -203,5 +232,40 @@ impl Render for Goal {
         )?;
         writeln!(w, "  {}", self.description)?;
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn display_ref_with_seq() {
+        let goal = Goal::new(
+            GoalId::from("test123".to_string()),
+            Some(5),
+            "Test goal".to_string(),
+            GoalState::Pending,
+            Timestamp::now(),
+            Timestamp::now(),
+            None,
+            Metrics::default(),
+        );
+        assert_eq!(goal.display_ref(), Some("g5".to_string()));
+    }
+
+    #[test]
+    fn display_ref_without_seq() {
+        let goal = Goal::new(
+            GoalId::from("test123".to_string()),
+            None,
+            "Test goal".to_string(),
+            GoalState::Pending,
+            Timestamp::now(),
+            Timestamp::now(),
+            None,
+            Metrics::default(),
+        );
+        assert_eq!(goal.display_ref(), None);
     }
 }

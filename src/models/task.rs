@@ -71,6 +71,14 @@ impl TaskMetrics {
 pub struct Task {
     id: TaskId,
     goal_id: GoalId,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    seq: Option<u32>,
+    #[serde(
+        rename = "ref",
+        skip_deserializing,
+        skip_serializing_if = "Option::is_none"
+    )]
+    display_ref_field: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     parent_id: Option<TaskId>,
     description: String,
@@ -105,6 +113,7 @@ impl Task {
     pub fn new(
         id: TaskId,
         goal_id: GoalId,
+        seq: Option<u32>,
         parent_id: Option<TaskId>,
         description: String,
         priority: Priority,
@@ -117,6 +126,8 @@ impl Task {
         Self {
             id,
             goal_id,
+            seq,
+            display_ref_field: None, // Will be computed after loading
             parent_id,
             description,
             priority,
@@ -148,6 +159,25 @@ impl Task {
 
     pub fn goal_id(&self) -> &GoalId {
         &self.goal_id
+    }
+
+    pub fn seq(&self) -> Option<u32> {
+        self.seq
+    }
+
+    /// Returns the display reference for this task (e.g., "g1.2").
+    /// Returns None if either this task's seq or the goal's seq is not assigned.
+    pub fn display_ref(&self, goal_seq: u32) -> Option<String> {
+        // If cached ref is available, use it; otherwise compute it
+        self.display_ref_field
+            .clone()
+            .or_else(|| self.seq.map(|s| format!("g{goal_seq}.{s}")))
+    }
+
+    /// Compute and set the `display_ref_field` based on the `seq` and `goal_seq`.
+    /// Called after deserialization to populate the computed field.
+    pub fn compute_display_ref(&mut self, goal_seq: u32) {
+        self.display_ref_field = self.seq.map(|s| format!("g{goal_seq}.{s}"));
     }
 
     pub fn parent_id(&self) -> Option<&TaskId> {
@@ -430,6 +460,8 @@ mod tests {
         Task {
             id: TaskId::from("t_abc123".to_string()),
             goal_id: GoalId::from("g_xyz789".to_string()),
+            seq: None,
+            display_ref_field: None,
             parent_id: None,
             description: "test task".to_string(),
             priority: Priority::default(),
@@ -843,5 +875,18 @@ mod tests {
         assert!(output.contains("This is the summary."));
         assert!(!output.contains("input"));
         assert!(!output.contains("Receives"));
+    }
+
+    #[test]
+    fn display_ref_with_seq() {
+        let mut task = task();
+        task.seq = Some(3);
+        assert_eq!(task.display_ref(5), Some("g5.3".to_string()));
+    }
+
+    #[test]
+    fn display_ref_without_seq() {
+        let task = task();
+        assert_eq!(task.display_ref(5), None);
     }
 }
