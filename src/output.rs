@@ -180,6 +180,18 @@ pub fn goal_cancelled(goal: &Goal, cancelled_task_ids: &[TaskId]) -> Result<()> 
     Ok(())
 }
 
+pub fn goal_restored(goal: &Goal) -> Result<()> {
+    let mut w = io::stdout().lock();
+    writeln!(
+        w,
+        "{} {}",
+        style("Restored goal:").green(),
+        style(goal.id()).cyan().bold()
+    )?;
+    writeln!(w, "  {}", truncate(goal.description(), 80))?;
+    Ok(())
+}
+
 pub fn task_edited(task: &Task) -> Result<()> {
     let mut w = io::stdout().lock();
     writeln!(

@@ -30,6 +30,20 @@ pub fn run(db: &Database) -> Result<Vec<GoalWithTasks>> {
     Ok(results)
 }
 
+pub fn run_archived(db: &Database) -> Result<Vec<GoalWithTasks>> {
+    let archived_goals = db.list_archived_goals()?;
+    let results = archived_goals
+        .into_iter()
+        .map(|goal| GoalWithTasks {
+            goal,
+            tasks: Vec::new(), // Archived goals don't load tasks
+            metrics: Metrics::default(),
+        })
+        .collect();
+
+    Ok(results)
+}
+
 /// Topological sort of tasks by `blocked_by` dependencies.
 /// Tasks with no blockers come first. Falls back to creation order for ties.
 fn topo_sort(tasks: Vec<&Task>) -> Vec<Task> {
