@@ -9,7 +9,7 @@ use crate::commands::compact::CompactCandidate;
 use crate::commands::list::GoalWithTasks;
 use crate::commands::show::ShowResult;
 use crate::commands::status::{GoalSummary, StatusResult};
-use crate::commands::task::CompleteResult;
+use crate::commands::task::{CancelResult, CompleteResult};
 use crate::id::TaskId;
 use crate::models::{Goal, Task};
 
@@ -154,6 +154,29 @@ pub fn goal_edited(goal: &Goal) -> Result<()> {
         style(goal.id()).cyan().bold()
     )?;
     writeln!(w, "  {}", truncate(goal.description(), 80))?;
+    Ok(())
+}
+
+pub fn goal_cancelled(goal: &Goal, cancelled_task_ids: &[TaskId]) -> Result<()> {
+    let mut w = io::stdout().lock();
+    writeln!(
+        w,
+        "{} {}",
+        style("Cancelled goal:").dim(),
+        style(goal.id()).cyan().bold()
+    )?;
+    writeln!(w, "  {}", truncate(goal.description(), 80))?;
+
+    if !cancelled_task_ids.is_empty() {
+        writeln!(w)?;
+        writeln!(
+            w,
+            "{} {}",
+            style("Cancelled").dim(),
+            style(format!("{} task(s)", cancelled_task_ids.len())).dim()
+        )?;
+    }
+
     Ok(())
 }
 
@@ -411,6 +434,45 @@ pub fn task_failed(task: &Task) -> Result<()> {
         style(task.id()).cyan().bold()
     )?;
     writeln!(w, "  {}", truncate(task.description(), 80))?;
+    Ok(())
+}
+
+pub fn task_cancelled(result: &CancelResult) -> Result<()> {
+    let mut w = io::stdout().lock();
+    writeln!(
+        w,
+        "{} {}",
+        style("Cancelled task:").dim(),
+        style(result.task.id()).cyan().bold()
+    )?;
+    writeln!(w, "  {}", truncate(result.task.description(), 80))?;
+
+    if !result.unblocked_task_ids.is_empty() {
+        writeln!(w)?;
+        writeln!(
+            w,
+            "{} {}",
+            style("Unblocked").yellow(),
+            style(format!("{} task(s):", result.unblocked_task_ids.len())).yellow()
+        )?;
+        for id in &result.unblocked_task_ids {
+            writeln!(w, "  - {}", style(id).cyan())?;
+        }
+    }
+
+    if !result.cascaded_task_ids.is_empty() {
+        writeln!(w)?;
+        writeln!(
+            w,
+            "{} {}",
+            style("Cascade-cancelled").dim(),
+            style(format!("{} task(s):", result.cascaded_task_ids.len())).dim()
+        )?;
+        for id in &result.cascaded_task_ids {
+            writeln!(w, "  - {}", style(id).cyan())?;
+        }
+    }
+
     Ok(())
 }
 
@@ -778,13 +840,19 @@ fn show_goal(
 
         writeln!(w)?;
         writeln!(w, "{}", style("Metrics").bold())?;
-        writeln!(
+        write!(
             w,
-            "  Tasks: {} total, {} completed, {} failed",
+            "  Tasks: {} total, {} completed",
             metrics.task_count(),
-            metrics.tasks_completed(),
-            metrics.tasks_failed()
+            metrics.tasks_completed()
         )?;
+        if metrics.tasks_cancelled() > 0 {
+            write!(w, ", {} cancelled", metrics.tasks_cancelled())?;
+        }
+        if metrics.tasks_failed() > 0 {
+            write!(w, ", {} failed", metrics.tasks_failed())?;
+        }
+        writeln!(w)?;
         writeln!(w, "  Tokens: {}", metrics.total_tokens())?;
         writeln!(w, "  Elapsed: {}ms", metrics.elapsed_ms())?;
 

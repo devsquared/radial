@@ -424,7 +424,7 @@ fn test_goal_completion() {
 
     // Full detail via show
     let output = env.run(&["show", goal_id]).expect("Show goal failed");
-    assert!(output.contains("1 total, 1 completed, 0 failed"));
+    assert!(output.contains("1 total, 1 completed"));
 }
 
 #[test]

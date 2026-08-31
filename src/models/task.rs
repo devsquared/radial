@@ -29,6 +29,7 @@ pub enum Priority {
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, AsRefStr, EnumString)]
 #[serde(rename_all = "lowercase")]
 #[strum(serialize_all = "snake_case")]
+#[non_exhaustive]
 pub enum TaskState {
     Pending,
     Blocked,
@@ -36,6 +37,7 @@ pub enum TaskState {
     Verifying,
     Completed,
     Failed,
+    Cancelled,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -370,6 +372,21 @@ impl Task {
         true
     }
 
+    pub fn cancel(&mut self) -> bool {
+        // Cancelled is terminal - already cancelled tasks cannot be re-cancelled
+        if self.state == TaskState::Cancelled {
+            return false;
+        }
+        // Completed work is history - cannot cancel completed tasks
+        if self.state == TaskState::Completed {
+            return false;
+        }
+        // All other states (Pending, Blocked, InProgress, Verifying, Failed) can transition to Cancelled
+        self.state = TaskState::Cancelled;
+        self.updated_at = Timestamp::now();
+        true
+    }
+
     pub fn unblock(&mut self) {
         self.state = TaskState::Pending;
         self.updated_at = Timestamp::now();
@@ -388,11 +405,23 @@ impl Task {
 
 impl Render for Task {
     fn render(&self, w: &mut dyn Write) -> Result<()> {
+        let state_style = if self.state == TaskState::Cancelled {
+            style(self.state.as_ref()).dim()
+        } else {
+            style(self.state.as_ref()).yellow()
+        };
+
+        let id_style = if self.state == TaskState::Cancelled {
+            style(&self.id).cyan().dim().strikethrough()
+        } else {
+            style(&self.id).cyan().bold()
+        };
+
         writeln!(
             w,
             "{} [{}] [{}]",
-            style(&self.id).cyan().bold(),
-            style(self.state.as_ref()).yellow(),
+            id_style,
+            state_style,
             self.priority.as_ref(),
         )?;
 
@@ -610,6 +639,42 @@ mod tests {
         task.state = state;
         assert!(!task.retry());
         assert_eq!(task.state, state);
+    }
+
+    // -- cancel --
+
+    // Cancelling from valid states (Pending, Blocked, InProgress, Verifying, Failed)
+    // should transition to Cancelled and update timestamp.
+    #[rstest]
+    #[case::from_pending(TaskState::Pending)]
+    #[case::from_blocked(TaskState::Blocked)]
+    #[case::from_in_progress(TaskState::InProgress)]
+    #[case::from_verifying(TaskState::Verifying)]
+    #[case::from_failed(TaskState::Failed)]
+    fn cancel_succeeds_from_valid_states(mut task: Task, #[case] state: TaskState) {
+        task.state = state;
+        let before = task.updated_at;
+        assert!(task.cancel());
+        assert_eq!(task.state, TaskState::Cancelled);
+        assert!(task.updated_at >= before);
+    }
+
+    // cancel() rejects Completed tasks (completed work is history).
+    #[rstest]
+    fn cancel_rejects_completed(mut task: Task) {
+        task.state = TaskState::Completed;
+        assert!(!task.cancel());
+        assert_eq!(task.state, TaskState::Completed);
+    }
+
+    // cancel() rejects already-Cancelled tasks (idempotency check).
+    #[rstest]
+    fn cancel_rejects_already_cancelled(mut task: Task) {
+        task.state = TaskState::Cancelled;
+        let before = task.updated_at;
+        assert!(!task.cancel());
+        assert_eq!(task.state, TaskState::Cancelled);
+        assert_eq!(task.updated_at, before); // No timestamp change
     }
 
     // -- unblock --

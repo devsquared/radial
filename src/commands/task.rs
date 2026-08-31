@@ -1,3 +1,5 @@
+use std::collections::{HashSet, VecDeque};
+
 use anyhow::{Result, anyhow};
 use jiff::{SignedDuration, Timestamp};
 
@@ -13,6 +15,14 @@ use crate::models::{
 pub struct CompleteResult {
     pub task: Task,
     pub unblocked_task_ids: Vec<TaskId>,
+}
+
+/// Result of cancelling a task, including unblocked and cascaded tasks.
+#[derive(Debug)]
+pub struct CancelResult {
+    pub task: Task,
+    pub unblocked_task_ids: Vec<TaskId>,
+    pub cascaded_task_ids: Vec<TaskId>,
 }
 
 fn task_not_found_err(task_id: &TaskId, db: &Database) -> anyhow::Error {
@@ -348,6 +358,7 @@ pub fn find_stale_tasks(threshold: SignedDuration, db: &Database) -> Vec<&Task> 
         .collect()
 }
 
+#[allow(clippy::too_many_lines)]
 pub fn complete(
     task_id: &TaskId,
     result_summary: String,
@@ -454,16 +465,25 @@ pub fn complete(
     }
 
     // Check goal completion
+    // Cancelled tasks count as "resolved" alongside completed tasks
     let all_tasks = db.list_tasks(&goal_id);
-    let all_completed = all_tasks.iter().all(|t| t.state() == TaskState::Completed);
+    let all_resolved = all_tasks
+        .iter()
+        .all(|t| matches!(t.state(), TaskState::Completed | TaskState::Cancelled));
+    let any_completed = all_tasks.iter().any(|t| t.state() == TaskState::Completed);
     let any_failed = all_tasks.iter().any(|t| t.state() == TaskState::Failed);
 
     let goal = db
         .get_goal_mut(&goal_id)
         .ok_or_else(|| anyhow!("Goal not found: {goal_id}"))?;
 
-    if all_completed {
-        goal.mark_completed();
+    if all_resolved {
+        if any_completed {
+            goal.mark_completed();
+        } else {
+            // All tasks cancelled, none completed
+            goal.mark_cancelled();
+        }
     } else if any_failed {
         goal.mark_failed();
     } else {
@@ -604,6 +624,182 @@ pub fn release(task_id: &TaskId, db: &mut Database) -> Result<Task> {
     }
 
     Ok(released_task)
+}
+
+/// Cascade cancel a task and all its downstream dependencies using BFS.
+///
+/// Returns the IDs of all tasks that were cascade-cancelled.
+fn cascade_cancel_downstream(
+    root_task_id: &TaskId,
+    goal_id: &GoalId,
+    downstream_ids: &[TaskId],
+    base: &std::path::Path,
+    db: &mut Database,
+) -> Result<Vec<TaskId>> {
+    let mut cascaded_task_ids = Vec::new();
+    let mut to_cancel: VecDeque<TaskId> = VecDeque::new();
+    let mut visited: HashSet<TaskId> = HashSet::new();
+
+    // Start BFS with tasks that were directly blocked by the cancelled task
+    for dep_id in downstream_ids {
+        to_cancel.push_back(dep_id.clone());
+    }
+
+    while let Some(current_id) = to_cancel.pop_front() {
+        if visited.contains(&current_id) {
+            continue;
+        }
+        visited.insert(current_id.clone());
+
+        let Some(current_task) = db.get_task(&current_id) else {
+            continue; // Task was deleted or doesn't exist
+        };
+
+        // Skip if already terminal
+        if matches!(
+            current_task.state(),
+            TaskState::Completed | TaskState::Cancelled
+        ) {
+            continue;
+        }
+
+        // Cancel this task
+        let task_mut = db.get_task_mut(&current_id).unwrap();
+        if task_mut.cancel() {
+            let cascade_reason = format!("cascaded from cancellation of {root_task_id}");
+            let cascade_comment = Comment::new(generate_id(), cascade_reason, Timestamp::now());
+            task_mut.add_comment(cascade_comment);
+            task_mut.write_file(base)?;
+            cascaded_task_ids.push(current_id.clone());
+
+            // Sync parent if this task has one
+            if let Some(pid) = task_mut.parent_id().cloned() {
+                db.sync_parent_state(&pid, base)?;
+            }
+
+            // Find tasks blocked by this cancelled task and add to queue
+            let next_downstream: Vec<TaskId> = db
+                .list_tasks(goal_id)
+                .iter()
+                .filter(|t| t.blocked_by().contains(&current_id))
+                .map(|t| t.id().clone())
+                .collect();
+
+            for next_id in next_downstream {
+                if !visited.contains(&next_id) {
+                    to_cancel.push_back(next_id);
+                }
+            }
+        }
+    }
+
+    Ok(cascaded_task_ids)
+}
+
+pub fn cancel(
+    task_id: &TaskId,
+    reason: Option<String>,
+    author: &str,
+    cascade: bool,
+    db: &mut Database,
+) -> Result<CancelResult> {
+    let task = db
+        .get_task(task_id)
+        .ok_or_else(|| task_not_found_err(task_id, db))?;
+
+    if db.has_subtasks(task_id) {
+        return Err(anyhow!(
+            "Task {task_id} has subtasks and cannot be cancelled directly. Cancel its subtasks instead."
+        ));
+    }
+
+    if task.state() == TaskState::Completed {
+        return Err(anyhow!(
+            "Cannot cancel a completed task. Completed work is history."
+        ));
+    }
+
+    if task.state() == TaskState::Cancelled {
+        return Err(anyhow!("Task is already cancelled."));
+    }
+
+    let goal_id = task.goal_id().clone();
+    let parent_id = task.parent_id().cloned();
+    let base = db.base_path().to_owned();
+
+    // Cancel the task
+    let task = db.get_task_mut(task_id).unwrap();
+    if !task.cancel() {
+        return Err(anyhow!("Failed to cancel task: state may have changed"));
+    }
+
+    // Add cancel comment with author and reason
+    let comment_text = if let Some(ref r) = reason {
+        format!("Cancelled by {author}: {r}")
+    } else {
+        format!("Cancelled by {author}")
+    };
+    let comment = Comment::new(generate_id(), comment_text, Timestamp::now());
+    task.add_comment(comment);
+    task.write_file(&base)?;
+    let cancelled_task = task.clone();
+
+    // Remove the cancelled task ID from any downstream blocked_by lists and unblock
+    // tasks whose blocker list becomes empty (Option A: auto-unblock)
+    let downstream_ids: Vec<TaskId> = db
+        .list_tasks(&goal_id)
+        .iter()
+        .filter(|t| t.blocked_by().contains(task_id))
+        .map(|t| t.id().clone())
+        .collect();
+
+    let mut unblocked_task_ids = Vec::new();
+
+    for dep_id in &downstream_ids {
+        let dep = db.get_task_mut(dep_id).unwrap();
+        let new_blockers: Vec<TaskId> = dep
+            .blocked_by()
+            .iter()
+            .filter(|id| *id != task_id)
+            .cloned()
+            .collect();
+        let should_unblock = new_blockers.is_empty() && dep.state() == TaskState::Blocked;
+        dep.set_blocked_by(new_blockers);
+
+        // Add system comment noting the cancelled dependency
+        let dep_comment_text = format!(
+            "Dependency {} (\"{}\") was cancelled{}. Verify this task's `receives` is still satisfiable before starting.",
+            task_id,
+            cancelled_task.description(),
+            reason.as_ref().map_or(String::new(), |r| format!(": {r}"))
+        );
+        let dep_comment = Comment::new(generate_id(), dep_comment_text, Timestamp::now());
+        dep.add_comment(dep_comment);
+
+        if should_unblock {
+            dep.unblock();
+            unblocked_task_ids.push(dep_id.clone());
+        }
+        dep.write_file(&base)?;
+    }
+
+    // Sync parent state
+    if let Some(ref pid) = parent_id {
+        db.sync_parent_state(pid, &base)?;
+    }
+
+    // Cascade cancellation to downstream dependencies if requested
+    let cascaded_task_ids = if cascade {
+        cascade_cancel_downstream(task_id, &goal_id, &downstream_ids, &base, db)?
+    } else {
+        Vec::new()
+    };
+
+    Ok(CancelResult {
+        task: cancelled_task,
+        unblocked_task_ids,
+        cascaded_task_ids,
+    })
 }
 
 pub fn delete(task_id: &TaskId, db: &mut Database) -> Result<Task> {
