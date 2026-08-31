@@ -21,7 +21,7 @@ pub enum ShowResult {
 pub fn run(id: &str, db: &Database) -> Result<ShowResult> {
     // Try task first (more common lookup), then goal
     if let Some(task) = db
-        .resolve_task_id(id)
+        .resolve_any_task(id)
         .ok()
         .and_then(|tid| db.get_task(&tid))
     {
@@ -29,7 +29,7 @@ pub fn run(id: &str, db: &Database) -> Result<ShowResult> {
     }
 
     if let Some(goal_and_id) = db
-        .resolve_goal_id(id)
+        .resolve_any_goal(id)
         .ok()
         .and_then(|gid| db.get_goal(&gid).map(|g| (gid, g)))
     {

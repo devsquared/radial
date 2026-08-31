@@ -202,11 +202,13 @@ pub fn task_list(tasks: &[Task], goal: &Goal, opts: &RenderOptions) -> Result<()
     // Comment lines: 11 spaces + timestamp (~20) + 2 spaces = ~33 prefix cols
     let comment_w = opts.desc_width(33);
     json_or(tasks, opts, |w| {
+        let goal_ref = goal.display_ref().unwrap_or_else(|| goal.id().to_string());
         writeln!(
             w,
-            "Tasks for {} [{}]",
-            style(goal.id()).cyan().bold(),
+            "Tasks for {} [{}]  {}",
+            style(&goal_ref).cyan().bold(),
             state_styled(goal.state().as_ref()),
+            style(goal.id()).dim(),
         )?;
         writeln!(w, "  {}", truncate(goal.description(), opts.desc_width(2)))?;
         writeln!(w)?;
@@ -227,16 +229,21 @@ pub fn task_list(tasks: &[Task], goal: &Goal, opts: &RenderOptions) -> Result<()
         )?;
 
         let subtask_map = build_subtask_map(tasks);
+        let goal_seq = goal.seq().unwrap_or(0);
 
         for task in tasks.iter().filter(|t| t.parent_id().is_none()) {
+            let task_ref = task
+                .display_ref(goal_seq)
+                .unwrap_or_else(|| task.id().to_string());
             writeln!(
                 w,
-                "{:<10} {:<13} {:<10} {:<12} {}",
-                style(task.id()).cyan(),
+                "{:<10} {:<13} {:<10} {:<12} {}  {}",
+                style(&task_ref).cyan(),
                 state_styled(task.state().as_ref()),
                 task.priority().as_ref(),
                 task.assignee().unwrap_or("-"),
                 truncate(task.description(), desc_w),
+                style(task.id()).dim(),
             )?;
             if opts.verbose && !task.comments().is_empty() {
                 let mut truncated = false;
@@ -266,14 +273,18 @@ pub fn task_list(tasks: &[Task], goal: &Goal, opts: &RenderOptions) -> Result<()
             }
             if let Some(subtasks) = subtask_map.get(task.id()) {
                 for subtask in subtasks {
+                    let subtask_ref = subtask
+                        .display_ref(goal_seq)
+                        .unwrap_or_else(|| subtask.id().to_string());
                     writeln!(
                         w,
-                        "  {:<8} {:<13} {:<10} {:<12} {}",
-                        style(subtask.id()).cyan(),
+                        "  {:<8} {:<13} {:<10} {:<12} {}  {}",
+                        style(&subtask_ref).cyan(),
                         state_styled(subtask.state().as_ref()),
                         subtask.priority().as_ref(),
                         subtask.assignee().unwrap_or("-"),
                         truncate(subtask.description(), sub_desc_w),
+                        style(subtask.id()).dim(),
                     )?;
                     if opts.verbose && !subtask.comments().is_empty() {
                         let mut truncated = false;
@@ -485,10 +496,13 @@ pub fn status(result: &StatusResult, opts: &RenderOptions) -> Result<()> {
 fn status_task(task: &Task, opts: &RenderOptions) -> Result<()> {
     let desc_w = opts.desc_width(49);
     json_or(task, opts, |w| {
+        // Note: We can't show full display ref without goal context,
+        // so just show the task ID (or seq if available)
+        let task_id_str = task.id().to_string();
         writeln!(
             w,
             "{:<10} {:<13} {:<10} {:<12} {}",
-            style(task.id()).cyan(),
+            style(&task_id_str).cyan(),
             state_styled(task.state().as_ref()),
             task.priority().as_ref(),
             task.assignee().unwrap_or("-"),
@@ -506,14 +520,16 @@ fn status_goal(
     json_or(goal_status, opts, |w| {
         let goal = goal_status.goal();
         let metrics = goal_status.metrics();
+        let goal_ref = goal.display_ref().unwrap_or_else(|| goal.id().to_string());
 
         writeln!(
             w,
-            "Goal: {}  {}  ({}/{} tasks)",
-            style(goal.id()).cyan().bold(),
+            "Goal: {}  {}  ({}/{} tasks)  {}",
+            style(&goal_ref).cyan().bold(),
             state_styled(goal.state().as_ref()),
             metrics.tasks_completed(),
             metrics.task_count(),
+            style(goal.id()).dim(),
         )?;
         writeln!(w, "  {}", truncate(goal.description(), opts.desc_width(2)))?;
         writeln!(w)?;
@@ -528,15 +544,20 @@ fn status_goal(
                 style("ASSIGNEE").bold().underlined(),
                 style("DESCRIPTION").bold().underlined(),
             )?;
+            let goal_seq = goal.seq().unwrap_or(0);
             for task in goal_status.tasks() {
+                let task_ref = task
+                    .display_ref(goal_seq)
+                    .unwrap_or_else(|| task.id().to_string());
                 writeln!(
                     w,
-                    "{:<10} {:<13} {:<10} {:<12} {}",
-                    style(task.id()).cyan(),
+                    "{:<10} {:<13} {:<10} {:<12} {}  {}",
+                    style(&task_ref).cyan(),
                     state_styled(task.state().as_ref()),
                     task.priority().as_ref(),
                     task.assignee().unwrap_or("-"),
                     truncate(task.description(), desc_w),
+                    style(task.id()).dim(),
                 )?;
             }
         }
@@ -564,13 +585,15 @@ fn status_all_goals(summaries: &[GoalSummary], opts: &RenderOptions) -> Result<(
         for summary in summaries {
             let goal = summary.goal();
             let metrics = summary.computed_metrics();
+            let goal_ref = goal.display_ref().unwrap_or_else(|| goal.id().to_string());
             writeln!(
                 w,
-                "{:<10} {:<13} {:<7} {}",
-                style(goal.id()).cyan(),
+                "{:<10} {:<13} {:<7} {}  {}",
+                style(&goal_ref).cyan(),
                 state_styled(goal.state().as_ref()),
                 format!("{}/{}", metrics.tasks_completed(), metrics.task_count()),
                 truncate(goal.description(), desc_w),
+                style(goal.id()).dim(),
             )?;
         }
         Ok(())
@@ -618,6 +641,7 @@ fn show_compacted_task(task: &Task, w: &mut dyn Write) -> Result<()> {
 
 fn show_task(task: &Task, opts: &RenderOptions) -> Result<()> {
     json_or(task, opts, |w| {
+        // Note: We can't show full display ref without goal context
         writeln!(
             w,
             "Task {}  [{}]",
@@ -730,11 +754,13 @@ fn show_goal(
 
     let desc_w = opts.desc_width(49);
     json_or(&detail, opts, |w| {
+        let goal_ref = goal.display_ref().unwrap_or_else(|| goal.id().to_string());
         writeln!(
             w,
-            "Goal {}  [{}]",
-            style(goal.id()).cyan().bold(),
+            "Goal {}  [{}]  {}",
+            style(&goal_ref).cyan().bold(),
             state_styled(goal.state().as_ref()),
+            style(goal.id()).dim(),
         )?;
         writeln!(w)?;
 
@@ -902,39 +928,49 @@ pub fn list(results: &[GoalWithTasks], opts: &RenderOptions) -> Result<()> {
             let goal = &r.goal;
             let metrics = &r.metrics;
 
+            let goal_ref = goal.display_ref().unwrap_or_else(|| goal.id().to_string());
             writeln!(
                 w,
-                "{}  {}  ({}/{})",
-                style(goal.id()).cyan().bold(),
-                state_styled(goal.state().as_ref()),
+                "{}  {}  ({}/{})  {}",
+                style(&goal_ref).cyan().bold(),
+                truncate(goal.description(), goal_desc_w),
                 metrics.tasks_completed(),
                 metrics.task_count(),
+                style(goal.id()).dim(),
             )?;
-            writeln!(w, "  {}", truncate(goal.description(), goal_desc_w))?;
 
             if !r.tasks.is_empty() {
                 writeln!(w)?;
                 let subtask_map = build_subtask_map(&r.tasks);
+                let goal_seq = goal.seq().unwrap_or(0);
                 for task in r.tasks.iter().filter(|t| t.parent_id().is_none()) {
+                    let task_ref = task
+                        .display_ref(goal_seq)
+                        .unwrap_or_else(|| task.id().to_string());
                     writeln!(
                         w,
-                        "  {:<10} {:<13} {:<10} {:<12} {}",
-                        style(task.id()).cyan(),
+                        "  {:<10} {:<13} {:<10} {:<12} {}  {}",
+                        style(&task_ref).cyan(),
                         state_styled(task.state().as_ref()),
                         task.priority().as_ref(),
                         task.assignee().unwrap_or("-"),
                         truncate(task.description(), task_desc_w),
+                        style(task.id()).dim(),
                     )?;
                     if let Some(subtasks) = subtask_map.get(task.id()) {
                         for subtask in subtasks {
+                            let subtask_ref = subtask
+                                .display_ref(goal_seq)
+                                .unwrap_or_else(|| subtask.id().to_string());
                             writeln!(
                                 w,
-                                "    {:<8} {:<13} {:<10} {:<12} {}",
-                                style(subtask.id()).cyan(),
+                                "    {:<8} {:<13} {:<10} {:<12} {}  {}",
+                                style(&subtask_ref).cyan(),
                                 state_styled(subtask.state().as_ref()),
                                 subtask.priority().as_ref(),
                                 subtask.assignee().unwrap_or("-"),
                                 truncate(subtask.description(), sub_desc_w),
+                                style(subtask.id()).dim(),
                             )?;
                         }
                     }

@@ -33,7 +33,7 @@ fn task_not_found_err(task_id: &TaskId, db: &Database) -> anyhow::Error {
     }
 }
 
-#[allow(clippy::too_many_arguments)]
+#[allow(clippy::too_many_arguments, clippy::too_many_lines)]
 pub fn create(
     goal_id: &GoalId,
     description: String,
@@ -140,9 +140,11 @@ pub fn create(
         TaskState::Blocked
     };
     let now = Timestamp::now();
+    let seq = db.next_task_seq(&goal_id_owned);
     let task = Task::new(
         TaskId::new(),
         goal_id_owned.clone(),
+        Some(seq),
         parent_id.clone(),
         description,
         priority,

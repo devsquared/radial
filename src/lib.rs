@@ -73,7 +73,7 @@ fn parse_blocked_by(raw: Option<Vec<String>>, db: &Database) -> Result<Option<Ve
         .iter()
         .flat_map(|s| s.split([',', ' ', '\t']))
         .filter(|s| !s.is_empty())
-        .map(|s| db.resolve_task_id(s).map_err(|e| anyhow!("{e}")))
+        .map(|s| db.resolve_any_task(s).map_err(|e| anyhow!("{e}")))
         .collect();
     Ok(Some(ids?))
 }
@@ -119,9 +119,9 @@ fn run_task(task_cmd: TaskCommands, db: &mut Database) -> Result<()> {
             blocked_by,
             json,
         } => {
-            let goal_id = db.resolve_goal_id(&goal_id).map_err(|e| anyhow!("{e}"))?;
+            let goal_id = db.resolve_any_goal(&goal_id).map_err(|e| anyhow!("{e}"))?;
             let parent = parent
-                .map(|p| db.resolve_task_id(&p).map_err(|e| anyhow!("{e}")))
+                .map(|p| db.resolve_any_task(&p).map_err(|e| anyhow!("{e}")))
                 .transpose()?;
             let prio = priority.unwrap_or_default();
             let task = commands::task::create(
@@ -145,7 +145,7 @@ fn run_task(task_cmd: TaskCommands, db: &mut Database) -> Result<()> {
             assignee,
             full,
         } => {
-            let goal_id = db.resolve_goal_id(&goal_id).map_err(|e| anyhow!("{e}"))?;
+            let goal_id = db.resolve_any_goal(&goal_id).map_err(|e| anyhow!("{e}"))?;
             let tasks = commands::task::list(&goal_id, priority.as_ref(), assignee.as_deref(), db)?;
             let goal = db
                 .get_goal(&goal_id)
@@ -161,7 +161,7 @@ fn run_task(task_cmd: TaskCommands, db: &mut Database) -> Result<()> {
             assignee,
             force,
         } => {
-            let task_id = db.resolve_task_id(&task_id).map_err(|e| anyhow!("{e}"))?;
+            let task_id = db.resolve_any_task(&task_id).map_err(|e| anyhow!("{e}"))?;
             let task = commands::task::start(&task_id, &assignee, force, db)?;
             output::task_started(&task)
         }
@@ -172,7 +172,7 @@ fn run_task(task_cmd: TaskCommands, db: &mut Database) -> Result<()> {
             tokens,
             elapsed,
         } => {
-            let task_id = db.resolve_task_id(&task_id).map_err(|e| anyhow!("{e}"))?;
+            let task_id = db.resolve_any_task(&task_id).map_err(|e| anyhow!("{e}"))?;
             let complete_result =
                 commands::task::complete(&task_id, result, artifacts, tokens, elapsed, db)?;
             output::task_completed(&complete_result)
@@ -182,12 +182,12 @@ fn run_task(task_cmd: TaskCommands, db: &mut Database) -> Result<()> {
             reason,
             compact,
         } => {
-            let task_id = db.resolve_task_id(&task_id).map_err(|e| anyhow!("{e}"))?;
+            let task_id = db.resolve_any_task(&task_id).map_err(|e| anyhow!("{e}"))?;
             let task = commands::task::fail(&task_id, reason, compact, db)?;
             output::task_failed(&task)
         }
         TaskCommands::Retry { task_id } => {
-            let task_id = db.resolve_task_id(&task_id).map_err(|e| anyhow!("{e}"))?;
+            let task_id = db.resolve_any_task(&task_id).map_err(|e| anyhow!("{e}"))?;
             let task = commands::task::retry(&task_id, db)?;
             output::task_retry(&task)
         }
@@ -198,7 +198,7 @@ fn run_task(task_cmd: TaskCommands, db: &mut Database) -> Result<()> {
         } => {
             if let Some(ref task_id_str) = task_id {
                 let task_id = db
-                    .resolve_task_id(task_id_str)
+                    .resolve_any_task(task_id_str)
                     .map_err(|e| anyhow!("{e}"))?;
                 let task = commands::task::release(&task_id, db)?;
                 output::task_released(&task)
@@ -216,17 +216,17 @@ fn run_task(task_cmd: TaskCommands, db: &mut Database) -> Result<()> {
             }
         }
         TaskCommands::Delete { task_id } => {
-            let task_id = db.resolve_task_id(&task_id).map_err(|e| anyhow!("{e}"))?;
+            let task_id = db.resolve_any_task(&task_id).map_err(|e| anyhow!("{e}"))?;
             let task = commands::task::delete(&task_id, db)?;
             output::task_deleted(&task)
         }
         TaskCommands::Comment { task_id, text } => {
-            let task_id = db.resolve_task_id(&task_id).map_err(|e| anyhow!("{e}"))?;
+            let task_id = db.resolve_any_task(&task_id).map_err(|e| anyhow!("{e}"))?;
             let task = commands::task::comment(&task_id, text, db)?;
             output::task_commented(&task, &RenderOptions::new())
         }
         TaskCommands::Comments { task_id } => {
-            let task_id = db.resolve_task_id(&task_id).map_err(|e| anyhow!("{e}"))?;
+            let task_id = db.resolve_any_task(&task_id).map_err(|e| anyhow!("{e}"))?;
             let task = commands::task::comments(&task_id, db)?;
             output::task_comments(&task, &RenderOptions::new())
         }
@@ -257,7 +257,7 @@ pub fn run(cli: Cli) -> Result<()> {
                     goal_id,
                     description,
                 } => {
-                    let goal_id = db.resolve_goal_id(&goal_id).map_err(|e| anyhow!("{e}"))?;
+                    let goal_id = db.resolve_any_goal(&goal_id).map_err(|e| anyhow!("{e}"))?;
                     let goal = commands::edit::goal(&goal_id, description, &mut db)?;
                     output::goal_edited(&goal)
                 }
@@ -270,7 +270,7 @@ pub fn run(cli: Cli) -> Result<()> {
                     verify,
                     blocked_by,
                 } => {
-                    let task_id = db.resolve_task_id(&task_id).map_err(|e| anyhow!("{e}"))?;
+                    let task_id = db.resolve_any_task(&task_id).map_err(|e| anyhow!("{e}"))?;
                     let task = commands::edit::task(
                         &task_id,
                         description,
@@ -293,10 +293,10 @@ pub fn run(cli: Cli) -> Result<()> {
         } => {
             let (db, _guard) = ensure_initialized_for_read()?;
             let goal = goal
-                .map(|g| db.resolve_goal_id(&g).map_err(|e| anyhow!("{e}")))
+                .map(|g| db.resolve_any_goal(&g).map_err(|e| anyhow!("{e}")))
                 .transpose()?;
             let task = task
-                .map(|t| db.resolve_task_id(&t).map_err(|e| anyhow!("{e}")))
+                .map(|t| db.resolve_any_task(&t).map_err(|e| anyhow!("{e}")))
                 .transpose()?;
             let result = commands::status::run(goal, task, assignee, &db)?;
             output::status(&result, &RenderOptions::new().json(json))
@@ -316,7 +316,7 @@ pub fn run(cli: Cli) -> Result<()> {
             json,
         } => {
             let (db, _guard) = ensure_initialized_for_read()?;
-            let goal_id = db.resolve_goal_id(&goal_id).map_err(|e| anyhow!("{e}"))?;
+            let goal_id = db.resolve_any_goal(&goal_id).map_err(|e| anyhow!("{e}"))?;
             let ready = commands::ready::run(&goal_id, priority.as_ref(), &db)?;
             let goal = db
                 .get_goal(&goal_id)
