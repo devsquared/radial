@@ -1,11 +1,7 @@
-use std::path::{Path, PathBuf};
-
-use anyhow::{Context, Result};
 use jiff::Timestamp;
 use serde::{Deserialize, Serialize};
 use strum::{AsRefStr, EnumString};
 
-use crate::db::atomic_write;
 use crate::id::GoalId;
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, AsRefStr, EnumString)]
@@ -213,16 +209,6 @@ impl Goal {
     pub fn mark_cancelled(&mut self) {
         self.state = GoalState::Cancelled;
         self.updated_at = Timestamp::now();
-    }
-
-    pub fn file_path(&self, base: &Path) -> PathBuf {
-        base.join(self.id.as_ref()).join("goal.toml")
-    }
-
-    pub fn write_file(&self, base: &Path) -> Result<()> {
-        let path = self.file_path(base);
-        let content = toml::to_string(self).context("Failed to serialize goal")?;
-        atomic_write(&path, content.as_bytes())
     }
 }
 
