@@ -207,6 +207,32 @@ impl Database {
         &self.path
     }
 
+    /// Path to a goal's TOML file: `<base>/<goal_id>/goal.toml`.
+    fn goal_path(&self, goal: &Goal) -> PathBuf {
+        self.path.join(goal.id().as_ref()).join("goal.toml")
+    }
+
+    /// Path to a task's TOML file: `<base>/<goal_id>/<task_id>.toml`.
+    fn task_path(&self, task: &Task) -> PathBuf {
+        self.path
+            .join(task.goal_id().as_ref())
+            .join(format!("{}.toml", task.id()))
+    }
+
+    /// Serialize and atomically write a goal to disk.
+    pub fn save_goal(&self, goal: &Goal) -> Result<()> {
+        let path = self.goal_path(goal);
+        let content = toml::to_string(goal).context("Failed to serialize goal")?;
+        atomic_write(&path, content.as_bytes())
+    }
+
+    /// Serialize and atomically write a task to disk.
+    pub fn save_task(&self, task: &Task) -> Result<()> {
+        let path = self.task_path(task);
+        let content = toml::to_string(task).context("Failed to serialize task")?;
+        atomic_write(&path, content.as_bytes())
+    }
+
     /// Load all data from the per-entity TOML files into memory.
     fn load(&mut self) -> Result<()> {
         let dir = fs::read_dir(&self.path).context("Failed to read .radial directory")?;
@@ -932,6 +958,70 @@ mod tests {
         let (_dir, mut db) = db;
         db.create_goal(make_goal("g1")).unwrap();
         assert!(db.create_goal(make_goal("g1")).is_err());
+    }
+
+    // -- save_goal / save_task --
+
+    // save_goal should write the same goal.toml a fresh create_goal would,
+    // without touching in-memory state.
+    #[rstest]
+    fn save_goal_persists_to_disk(db: (TempDir, Database)) {
+        let (dir, db) = db;
+        fs::create_dir_all(dir.path().join("g1")).unwrap();
+        let goal = make_goal("g1");
+        db.save_goal(&goal).unwrap();
+
+        let goal_path = dir.path().join("g1").join("goal.toml");
+        assert!(goal_path.exists());
+
+        let loaded: Goal = toml::from_str(&std::fs::read_to_string(goal_path).unwrap()).unwrap();
+        assert_eq!(loaded.id(), &goal_id("g1"));
+        assert!(db.get_goal(&goal_id("g1")).is_none());
+    }
+
+    // Calling save_goal again with updated fields should overwrite the file
+    // in place rather than erroring on an existing path.
+    #[rstest]
+    fn save_goal_overwrites_existing(db_with_goal_and_task: (TempDir, Database)) {
+        let (dir, db) = db_with_goal_and_task;
+        let mut goal = db.get_goal(&goal_id("g1")).unwrap().clone();
+        goal.mark_in_progress();
+        db.save_goal(&goal).unwrap();
+
+        let goal_path = dir.path().join("g1").join("goal.toml");
+        let loaded: Goal = toml::from_str(&std::fs::read_to_string(goal_path).unwrap()).unwrap();
+        assert_eq!(loaded.state(), GoalState::InProgress);
+    }
+
+    // save_task should write {task_id}.toml inside the goal's directory,
+    // without touching in-memory state.
+    #[rstest]
+    fn save_task_persists_to_disk(db: (TempDir, Database)) {
+        let (dir, db) = db;
+        fs::create_dir_all(dir.path().join("g1")).unwrap();
+        let task = make_task("t1", "g1", TaskState::Pending);
+        db.save_task(&task).unwrap();
+
+        let task_path = dir.path().join("g1").join("t1.toml");
+        assert!(task_path.exists());
+
+        let loaded: Task = toml::from_str(&std::fs::read_to_string(task_path).unwrap()).unwrap();
+        assert_eq!(loaded.id(), &task_id("t1"));
+        assert!(db.get_task(&task_id("t1")).is_none());
+    }
+
+    // Calling save_task again with an updated state should overwrite the
+    // file in place rather than erroring on an existing path.
+    #[rstest]
+    fn save_task_overwrites_existing(db_with_goal_and_task: (TempDir, Database)) {
+        let (dir, db) = db_with_goal_and_task;
+        let mut task = db.get_task(&task_id("t1")).unwrap().clone();
+        task.transition(TaskState::Pending, TaskState::InProgress);
+        db.save_task(&task).unwrap();
+
+        let task_path = dir.path().join("g1").join("t1.toml");
+        let loaded: Task = toml::from_str(&std::fs::read_to_string(task_path).unwrap()).unwrap();
+        assert_eq!(loaded.state(), TaskState::InProgress);
     }
 
     // -- get_goal / get_goal_mut --
