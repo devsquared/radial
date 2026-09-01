@@ -16,16 +16,15 @@ use cli::{Cli, Commands, CompactCommands, EditCommands, GoalCommands, TaskComman
 use db::{Database, DbLock};
 use id::TaskId;
 use output::RenderOptions;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 pub const RADIAL_DIR: &str = ".radial";
 pub const REDIRECT_FILE: &str = "redirect";
 
-/// Finds the `.radial/` directory by walking up from the current directory.
+/// Finds the `.radial/` directory by walking up from `from`.
 /// Returns `None` if no `.radial/` directory is found.
-pub fn find_radial_dir() -> Option<PathBuf> {
-    let current_dir = std::env::current_dir().ok()?;
-    let mut dir = current_dir.as_path();
+pub fn find_radial_dir(from: &Path) -> Option<PathBuf> {
+    let mut dir = from;
 
     loop {
         let radial_path = dir.join(RADIAL_DIR);
@@ -39,8 +38,8 @@ pub fn find_radial_dir() -> Option<PathBuf> {
 
 /// Resolves the final radial directory, following any redirect file.
 /// A redirect file contains a path (absolute or relative) to another `.radial/` directory.
-pub fn resolve_radial_dir() -> Option<PathBuf> {
-    let radial_dir = find_radial_dir()?;
+pub fn resolve_radial_dir(from: &Path) -> Option<PathBuf> {
+    let radial_dir = find_radial_dir(from)?;
     let redirect_path = radial_dir.join(REDIRECT_FILE);
 
     if redirect_path.is_file() {
@@ -62,7 +61,8 @@ pub fn resolve_radial_dir() -> Option<PathBuf> {
 }
 
 fn get_radial_path() -> Option<PathBuf> {
-    resolve_radial_dir()
+    let current_dir = std::env::current_dir().ok()?;
+    resolve_radial_dir(&current_dir)
 }
 
 /// Parses a list of raw ID strings (which may themselves be comma- or
