@@ -64,6 +64,12 @@ locally will fail the pipeline.
 - **Tests** (`cargo nextest run`): Includes unit and integration tests. Do not move on
   until all pass.
 
+### Commit Messages
+
+Do not append "Co-Authored-By: <model name>" or any other Claude/AI attribution
+lines (session links included) to commit messages or pull request descriptions
+in this repository.
+
 ## Dependencies
 
 - `clap` (derive) — CLI parsing
