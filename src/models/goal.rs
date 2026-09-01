@@ -1,15 +1,12 @@
-use std::io::Write;
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
-use console::style;
 use jiff::Timestamp;
 use serde::{Deserialize, Serialize};
 use strum::{AsRefStr, EnumString};
 
 use crate::db::atomic_write;
 use crate::id::GoalId;
-use crate::output::Render;
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, AsRefStr, EnumString)]
 #[serde(rename_all = "lowercase")]
@@ -24,6 +21,7 @@ pub enum GoalState {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(default)]
 pub struct Metrics {
     total_tokens: i64,
     prompt_tokens: i64,
@@ -89,26 +87,6 @@ impl Metrics {
 
     pub fn tasks_cancelled(&self) -> i64 {
         self.tasks_cancelled
-    }
-}
-
-impl Render for Metrics {
-    fn render(&self, w: &mut dyn Write) -> Result<()> {
-        write!(
-            w,
-            "  Tasks: {} total, {} completed",
-            self.task_count, self.tasks_completed
-        )?;
-        if self.tasks_cancelled > 0 {
-            write!(w, ", {} cancelled", self.tasks_cancelled)?;
-        }
-        if self.tasks_failed > 0 {
-            write!(w, ", {} failed", self.tasks_failed)?;
-        }
-        writeln!(w)?;
-        writeln!(w, "  Tokens: {}", self.total_tokens)?;
-        writeln!(w, "  Elapsed: {}ms", self.elapsed_ms)?;
-        Ok(())
     }
 }
 
@@ -248,19 +226,6 @@ impl Goal {
     }
 }
 
-impl Render for Goal {
-    fn render(&self, w: &mut dyn Write) -> Result<()> {
-        writeln!(
-            w,
-            "{} [{}]",
-            style(&self.id).cyan().bold(),
-            style(self.state.as_ref()).yellow()
-        )?;
-        writeln!(w, "  {}", self.description)?;
-        Ok(())
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -293,5 +258,49 @@ mod tests {
             Metrics::default(),
         );
         assert_eq!(goal.display_ref(), None);
+    }
+
+    // Goal files written before a counter existed omit its key entirely. Parsing
+    // must fall back to the default rather than failing, because the database
+    // loads every goal up front and one stale file would take down all commands.
+    #[test]
+    fn metrics_parses_without_tasks_cancelled() {
+        let legacy = "
+total_tokens = 10
+prompt_tokens = 4
+completion_tokens = 6
+elapsed_ms = 250
+task_count = 3
+tasks_completed = 2
+tasks_failed = 1
+";
+        let metrics: Metrics = toml::from_str(legacy).expect("legacy metrics should parse");
+        assert_eq!(metrics.tasks_cancelled(), 0);
+        assert_eq!(metrics.task_count(), 3);
+        assert_eq!(metrics.tasks_completed(), 2);
+        assert_eq!(metrics.tasks_failed(), 1);
+    }
+
+    #[test]
+    fn goal_parses_with_legacy_metrics_table() {
+        let legacy = r#"
+id = "abc12345"
+description = "legacy goal"
+state = "inprogress"
+created_at = "2026-04-05T19:03:40.353107Z"
+updated_at = "2026-04-05T19:03:40.353107Z"
+
+[metrics]
+total_tokens = 0
+prompt_tokens = 0
+completion_tokens = 0
+elapsed_ms = 0
+task_count = 0
+tasks_completed = 0
+tasks_failed = 0
+"#;
+        let goal: Goal = toml::from_str(legacy).expect("legacy goal should parse");
+        assert_eq!(goal.description(), "legacy goal");
+        assert_eq!(goal.metrics().tasks_cancelled(), 0);
     }
 }

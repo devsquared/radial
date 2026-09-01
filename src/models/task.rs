@@ -1,8 +1,6 @@
-use std::io::Write;
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
-use console::style;
 use jiff::Timestamp;
 use serde::{Deserialize, Serialize};
 use strum::{AsRefStr, EnumString};
@@ -10,7 +8,6 @@ use strum::{AsRefStr, EnumString};
 use super::{Comment, Contract, Outcome};
 use crate::db::atomic_write;
 use crate::id::{GoalId, TaskId};
-use crate::output::Render;
 
 #[derive(
     Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord, AsRefStr, EnumString,
@@ -403,84 +400,10 @@ impl Task {
     }
 }
 
-impl Render for Task {
-    fn render(&self, w: &mut dyn Write) -> Result<()> {
-        let state_style = if self.state == TaskState::Cancelled {
-            style(self.state.as_ref()).dim()
-        } else {
-            style(self.state.as_ref()).yellow()
-        };
-
-        let id_style = if self.state == TaskState::Cancelled {
-            style(&self.id).cyan().dim().strikethrough()
-        } else {
-            style(&self.id).cyan().bold()
-        };
-
-        writeln!(
-            w,
-            "{} [{}] [{}]",
-            id_style,
-            state_style,
-            self.priority.as_ref(),
-        )?;
-
-        if self.compacted {
-            if let Some(ref summary) = self.summary {
-                writeln!(w, "  {} {}", style("[compacted]").dim(), summary)?;
-            } else {
-                writeln!(w, "  {}", style("[compacted]").dim())?;
-            }
-            if let Some(ref result) = self.result
-                && !result.artifacts().is_empty()
-            {
-                writeln!(w, "  Artifacts: {}", result.artifacts().join(", "))?;
-            }
-            return Ok(());
-        }
-
-        writeln!(w, "  {}", self.description)?;
-
-        if let Some(parent_id) = &self.parent_id {
-            writeln!(w, "  Parent: {parent_id}")?;
-        }
-
-        if let Some(assignee) = &self.assignee {
-            writeln!(w, "  Assignee: {assignee}")?;
-        }
-
-        match self.contract {
-            Some(ref contract) => {
-                writeln!(w, "  Contract:")?;
-                writeln!(w, "    Receives: {}", contract.receives())?;
-                writeln!(w, "    Produces: {}", contract.produces())?;
-                writeln!(w, "    Verify:   {}", contract.verify())?;
-            }
-            None => {
-                writeln!(w, "  Contract: {}", style("(not set)").dim())?;
-            }
-        }
-
-        if !self.blocked_by.is_empty() {
-            let ids: Vec<&str> = self.blocked_by.iter().map(AsRef::as_ref).collect();
-            writeln!(w, "  Blocked by: {}", ids.join(", "))?;
-        }
-
-        if let Some(result) = &self.result {
-            writeln!(w, "  Result: {}", result.summary())?;
-            if !result.artifacts().is_empty() {
-                writeln!(w, "  Artifacts: {}", result.artifacts().join(", "))?;
-            }
-        }
-        Ok(())
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::id::{GoalId, TaskId};
-    use crate::output::Render;
     use rstest::{fixture, rstest};
 
     #[fixture]
@@ -508,12 +431,6 @@ mod tests {
             compacted: false,
             summary: None,
         }
-    }
-
-    fn render_to_string(task: &Task) -> String {
-        let mut buf = Vec::new();
-        task.render(&mut buf).unwrap();
-        String::from_utf8(buf).unwrap()
     }
 
     // -- transition --
@@ -712,53 +629,6 @@ mod tests {
         assert_eq!(path, PathBuf::from("/tmp/.radial/g_xyz789/t_abc123.toml"));
     }
 
-    // -- render --
-
-    // The summary render should show the description and indicate
-    // missing contract with "(not set)".
-    #[rstest]
-    fn render_includes_description(task: Task) {
-        let output = render_to_string(&task);
-        assert!(output.contains("test task"));
-        assert!(output.contains("(not set)"));
-    }
-
-    // When a contract is present, all three fields should appear.
-    #[rstest]
-    fn render_includes_contract_fields(mut task: Task) {
-        task.contract = Some(Contract::new(
-            "input data".to_string(),
-            "output data".to_string(),
-            "check output".to_string(),
-        ));
-        let output = render_to_string(&task);
-        assert!(output.contains("input data"));
-        assert!(output.contains("output data"));
-        assert!(output.contains("check output"));
-    }
-
-    // Blocked tasks should show which task IDs they're waiting on.
-    #[rstest]
-    fn render_includes_blocked_by(mut task: Task) {
-        task.state = TaskState::Blocked;
-        task.blocked_by = vec![TaskId::from("t_other".to_string())];
-        let output = render_to_string(&task);
-        assert!(output.contains("Blocked by: t_other"));
-    }
-
-    // Completed tasks should show the result summary and artifact list.
-    #[rstest]
-    fn render_includes_result(mut task: Task) {
-        task.state = TaskState::Completed;
-        task.result = Some(Outcome::new(
-            "all good".to_string(),
-            vec!["out.txt".to_string()],
-        ));
-        let output = render_to_string(&task);
-        assert!(output.contains("all good"));
-        assert!(output.contains("out.txt"));
-    }
-
     // -- assignee --
 
     // Setting an assignee should store the value and bump updated_at.
@@ -808,14 +678,6 @@ mod tests {
         task.state = TaskState::InProgress;
         assert!(!task.release());
         assert_eq!(task.state, TaskState::InProgress);
-    }
-
-    // Render should include assignee when set.
-    #[rstest]
-    fn render_includes_assignee(mut task: Task) {
-        task.assignee = Some("agent-1".to_string());
-        let output = render_to_string(&task);
-        assert!(output.contains("Assignee: agent-1"));
     }
 
     // -- started_at --
@@ -922,24 +784,6 @@ mod tests {
         assert!(task.compact("first".to_string()));
         assert!(!task.compact("second".to_string()));
         assert_eq!(task.summary.as_deref(), Some("first"));
-    }
-
-    // Render of a compacted task should show [compacted] and the summary,
-    // not the contract or full description.
-    #[rstest]
-    fn render_compacted_task(mut task: Task) {
-        task.state = TaskState::Completed;
-        task.contract = Some(Contract::new(
-            "input".to_string(),
-            "output".to_string(),
-            "verify".to_string(),
-        ));
-        task.compact("This is the summary.".to_string());
-        let output = render_to_string(&task);
-        assert!(output.contains("[compacted]"));
-        assert!(output.contains("This is the summary."));
-        assert!(!output.contains("input"));
-        assert!(!output.contains("Receives"));
     }
 
     #[test]
