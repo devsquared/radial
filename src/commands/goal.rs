@@ -66,7 +66,6 @@ pub fn cancel(
         .collect();
 
     let mut cancelled_task_ids = Vec::new();
-    let base = db.base_path().to_owned();
 
     // Cancel each non-terminal task
     for task_id in &tasks_to_cancel {
@@ -81,9 +80,8 @@ pub fn cancel(
     let goal_mut = db.get_goal_mut(goal_id).unwrap();
     goal_mut.mark_cancelled();
     goal_mut.set_metrics(metrics);
-    goal_mut.write_file(&base)?;
-
-    let cancelled_goal = db.get_goal(goal_id).unwrap().clone();
+    let cancelled_goal = goal_mut.clone();
+    db.save_goal(&cancelled_goal)?;
 
     Ok((cancelled_goal, cancelled_task_ids))
 }

@@ -307,7 +307,7 @@ impl Database {
         let goal_dir = self.path.join(goal.id().as_ref());
         fs::create_dir_all(&goal_dir).context("Failed to create goal directory")?;
 
-        goal.write_file(&self.path)?;
+        self.save_goal(&goal)?;
         self.goals.insert(goal.id().clone(), goal);
 
         Ok(())
@@ -463,7 +463,7 @@ impl Database {
             bail!("Task already exists: {}", task.id());
         }
 
-        task.write_file(&self.path)?;
+        self.save_task(&task)?;
         self.tasks.insert(task.id().clone(), task);
 
         Ok(())
@@ -511,11 +511,7 @@ impl Database {
 
     /// Derive the parent task's state from its subtasks and persist if changed.
     /// Returns the derived state if the parent was updated, None if unchanged or no subtasks.
-    pub fn sync_parent_state(
-        &mut self,
-        parent_id: &TaskId,
-        base: &Path,
-    ) -> Result<Option<TaskState>> {
+    pub fn sync_parent_state(&mut self, parent_id: &TaskId) -> Result<Option<TaskState>> {
         let subtask_states: Vec<TaskState> = self
             .list_subtasks(parent_id)
             .iter()
@@ -538,7 +534,8 @@ impl Database {
         }
 
         parent.set_derived_state(derived);
-        parent.write_file(base)?;
+        let parent = parent.clone();
+        self.save_task(&parent)?;
 
         Ok(Some(derived))
     }
@@ -1518,7 +1515,7 @@ mod tests {
 
     // Regression test for a goal loaded from a pre-existing `.radial/` whose ID was minted
     // before IDs were generated lowercase-only. `Deserialize` preserves stored case (it must,
-    // since `Goal::file_path` joins the ID directly onto the on-disk directory name), so
+    // since `Database::goal_path` joins the ID directly onto the on-disk directory name), so
     // resolution has to fold case itself rather than relying on a normalized key.
     #[rstest]
     fn resolve_goal_id_legacy_mixed_case(mut db: (TempDir, Database)) {

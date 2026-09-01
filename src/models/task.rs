@@ -1,12 +1,8 @@
-use std::path::{Path, PathBuf};
-
-use anyhow::{Context, Result};
 use jiff::Timestamp;
 use serde::{Deserialize, Serialize};
 use strum::{AsRefStr, EnumString};
 
 use super::{Comment, Contract, Outcome};
-use crate::db::atomic_write;
 use crate::id::{GoalId, TaskId};
 
 #[derive(
@@ -305,17 +301,6 @@ impl Task {
         self.state = TaskState::Pending;
         self.updated_at = Timestamp::now();
         true
-    }
-
-    pub fn file_path(&self, base: &Path) -> PathBuf {
-        base.join(self.goal_id.as_ref())
-            .join(format!("{}.toml", self.id))
-    }
-
-    pub fn write_file(&self, base: &Path) -> Result<()> {
-        let path = self.file_path(base);
-        let content = toml::to_string(self).context("Failed to serialize task")?;
-        atomic_write(&path, content.as_bytes())
     }
 
     pub fn transition(&mut self, from: TaskState, to: TaskState) -> bool {
@@ -618,15 +603,6 @@ mod tests {
         assert_eq!(task.comments.len(), 1);
         assert_eq!(task.comments[0].text(), "hello");
         assert!(task.updated_at >= before);
-    }
-
-    // -- file_path --
-
-    // Task files live at {base}/{goal_id}/{task_id}.toml.
-    #[rstest]
-    fn file_path_is_correct(task: Task) {
-        let path = task.file_path(Path::new("/tmp/.radial"));
-        assert_eq!(path, PathBuf::from("/tmp/.radial/g_xyz789/t_abc123.toml"));
     }
 
     // -- assignee --

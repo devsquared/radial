@@ -48,7 +48,6 @@ pub fn analyze(goal: Option<&str>, db: &Database) -> Result<Vec<CompactCandidate
 }
 
 pub fn apply(task_id: &str, summary: String, db: &mut Database) -> Result<String> {
-    let base = db.base_path().to_path_buf();
     let tid = db.resolve_any_task(task_id).map_err(|e| anyhow!("{e}"))?;
     let task = db
         .get_task_mut(&tid)
@@ -64,7 +63,8 @@ pub fn apply(task_id: &str, summary: String, db: &mut Database) -> Result<String
         ));
     }
 
-    task.write_file(&base)?;
+    let task = task.clone();
+    db.save_task(&task)?;
     Ok(task_id.to_string())
 }
 

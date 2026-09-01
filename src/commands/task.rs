@@ -168,15 +168,15 @@ pub fn create(
     db.create_task(task.clone())?;
 
     // Sync parent state now that it has a new subtask
-    let base = db.base_path().to_owned();
     if let Some(ref pid) = parent_id {
-        db.sync_parent_state(pid, &base)?;
+        db.sync_parent_state(pid)?;
     }
 
     // Update the goal
     let goal = db.get_goal_mut(&goal_id_owned).unwrap();
     goal.touch();
-    goal.write_file(&base)?;
+    let goal = goal.clone();
+    db.save_goal(&goal)?;
 
     Ok(task)
 }
@@ -240,7 +240,6 @@ pub fn start(task_id: &TaskId, assignee: &str, force: bool, db: &mut Database) -
 
     let goal_id = task.goal_id().to_owned();
 
-    let base = db.base_path().to_owned();
     let task = db.get_task_mut(task_id).unwrap();
     let started = task.transition_from_any(
         &[TaskState::Pending, TaskState::Blocked],
@@ -252,13 +251,15 @@ pub fn start(task_id: &TaskId, assignee: &str, force: bool, db: &mut Database) -
         ));
     }
     task.set_assignee(Some(assignee.to_owned()));
-    task.write_file(&base)?;
+    let task = task.clone();
+    db.save_task(&task)?;
 
     // Transition the goal to in_progress on first task start.
     let goal = db.get_goal_mut(&goal_id).unwrap();
     if goal.state() == GoalState::Pending {
         goal.mark_in_progress();
-        goal.write_file(&base)?;
+        let goal = goal.clone();
+        db.save_goal(&goal)?;
     }
 
     Ok(db.get_task(task_id).unwrap().clone())
@@ -293,7 +294,6 @@ pub fn release_stale(threshold: SignedDuration, db: &mut Database) -> Result<Vec
         }
     }
 
-    let base = db.base_path().to_owned();
     let mut parent_ids: HashSet<TaskId> = HashSet::new();
     let mut released = Vec::new();
     for id in &stale_ids {
@@ -302,12 +302,13 @@ pub fn release_stale(threshold: SignedDuration, db: &mut Database) -> Result<Vec
             parent_ids.insert(pid);
         }
         task.release();
-        task.write_file(&base)?;
-        released.push(task.clone());
+        let task = task.clone();
+        db.save_task(&task)?;
+        released.push(task);
     }
 
     for pid in &parent_ids {
-        db.sync_parent_state(pid, &base)?;
+        db.sync_parent_state(pid)?;
     }
 
     Ok(released)
@@ -318,7 +319,6 @@ pub fn release_all_in_progress(db: &mut Database) -> Result<Vec<Task>> {
     use std::collections::HashSet;
 
     let task_ids = collect_in_progress_task_ids(db);
-    let base = db.base_path().to_owned();
 
     let mut parent_ids: HashSet<TaskId> = HashSet::new();
     let mut released = Vec::new();
@@ -328,12 +328,13 @@ pub fn release_all_in_progress(db: &mut Database) -> Result<Vec<Task>> {
             parent_ids.insert(pid);
         }
         task.release();
-        task.write_file(&base)?;
-        released.push(task.clone());
+        let task = task.clone();
+        db.save_task(&task)?;
+        released.push(task);
     }
 
     for pid in &parent_ids {
-        db.sync_parent_state(pid, &base)?;
+        db.sync_parent_state(pid)?;
     }
 
     Ok(released)
@@ -396,7 +397,6 @@ pub fn complete(
     let outcome = Outcome::new(result_summary, artifacts_list);
     let metrics = TaskMetrics::new(tokens.unwrap_or(0), elapsed.unwrap_or(0), retry_count);
 
-    let base = db.base_path().to_owned();
     let task = db.get_task_mut(task_id).unwrap();
     if !task.complete(outcome, metrics) {
         return Err(anyhow!(
@@ -404,8 +404,8 @@ pub fn complete(
         ));
     }
     task.compact(compact_summary);
-    task.write_file(&base)?;
     let completed_task = task.clone();
+    db.save_task(&completed_task)?;
     let parent_id = completed_task.parent_id().cloned();
 
     // Snapshot blocked tasks in this goal for unblocking checks
@@ -429,7 +429,8 @@ pub fn complete(
             if all_blockers_done {
                 let dep_task = db.get_task_mut(dep_id).unwrap();
                 dep_task.unblock();
-                dep_task.write_file(&base)?;
+                let dep_task = dep_task.clone();
+                db.save_task(&dep_task)?;
                 unblocked_task_ids.push(dep_id.clone());
             }
         }
@@ -437,7 +438,7 @@ pub fn complete(
 
     // Sync parent state and handle tasks blocked by the parent
     if let Some(ref pid) = parent_id {
-        let new_parent_state = db.sync_parent_state(pid, &base)?;
+        let new_parent_state = db.sync_parent_state(pid)?;
 
         if new_parent_state == Some(TaskState::Completed) {
             // Unblock tasks that were waiting on the parent
@@ -457,7 +458,8 @@ pub fn complete(
                 if all_blockers_done {
                     let dep_task = db.get_task_mut(dep_id).unwrap();
                     dep_task.unblock();
-                    dep_task.write_file(&base)?;
+                    let dep_task = dep_task.clone();
+                    db.save_task(&dep_task)?;
                     unblocked_task_ids.push(dep_id.clone());
                 }
             }
@@ -489,7 +491,8 @@ pub fn complete(
     } else {
         goal.touch();
     }
-    goal.write_file(&base)?;
+    let goal = goal.clone();
+    db.save_goal(&goal)?;
 
     Ok(CompleteResult {
         task: completed_task,
@@ -524,7 +527,6 @@ pub fn fail(
         ));
     }
 
-    let base = db.base_path().to_owned();
     let task = db.get_task_mut(task_id).unwrap();
     if !task.transition_from_any(
         &[TaskState::InProgress, TaskState::Verifying],
@@ -550,11 +552,11 @@ pub fn fail(
         task.compact(summary);
     }
 
-    task.write_file(&base)?;
     let failed_task = task.clone();
+    db.save_task(&failed_task)?;
 
     if let Some(pid) = failed_task.parent_id() {
-        db.sync_parent_state(pid, &base)?;
+        db.sync_parent_state(pid)?;
     }
 
     Ok(failed_task)
@@ -582,16 +584,15 @@ pub fn retry(task_id: &TaskId, db: &mut Database) -> Result<Task> {
         ));
     }
 
-    let base = db.base_path().to_owned();
     let task = db.get_task_mut(task_id).unwrap();
     if !task.retry() {
         return Err(anyhow!("Failed to retry task: state may have changed"));
     }
-    task.write_file(&base)?;
     let retried_task = task.clone();
+    db.save_task(&retried_task)?;
 
     if let Some(pid) = retried_task.parent_id() {
-        db.sync_parent_state(pid, &base)?;
+        db.sync_parent_state(pid)?;
     }
 
     Ok(retried_task)
@@ -608,7 +609,6 @@ pub fn release(task_id: &TaskId, db: &mut Database) -> Result<Task> {
         ));
     }
 
-    let base = db.base_path().to_owned();
     let task = db.get_task_mut(task_id).unwrap();
     if !task.release() {
         return Err(anyhow!(
@@ -616,11 +616,11 @@ pub fn release(task_id: &TaskId, db: &mut Database) -> Result<Task> {
             task.state().as_ref()
         ));
     }
-    task.write_file(&base)?;
     let released_task = task.clone();
+    db.save_task(&released_task)?;
 
     if let Some(pid) = released_task.parent_id() {
-        db.sync_parent_state(pid, &base)?;
+        db.sync_parent_state(pid)?;
     }
 
     Ok(released_task)
@@ -633,7 +633,6 @@ fn cascade_cancel_downstream(
     root_task_id: &TaskId,
     goal_id: &GoalId,
     downstream_ids: &[TaskId],
-    base: &std::path::Path,
     db: &mut Database,
 ) -> Result<Vec<TaskId>> {
     let mut cascaded_task_ids = Vec::new();
@@ -669,12 +668,13 @@ fn cascade_cancel_downstream(
             let cascade_reason = format!("cascaded from cancellation of {root_task_id}");
             let cascade_comment = Comment::new(generate_id(), cascade_reason, Timestamp::now());
             task_mut.add_comment(cascade_comment);
-            task_mut.write_file(base)?;
+            let cancelled = task_mut.clone();
+            db.save_task(&cancelled)?;
             cascaded_task_ids.push(current_id.clone());
 
             // Sync parent if this task has one
-            if let Some(pid) = task_mut.parent_id().cloned() {
-                db.sync_parent_state(&pid, base)?;
+            if let Some(pid) = cancelled.parent_id().cloned() {
+                db.sync_parent_state(&pid)?;
             }
 
             // Find tasks blocked by this cancelled task and add to queue
@@ -725,7 +725,6 @@ pub fn cancel(
 
     let goal_id = task.goal_id().clone();
     let parent_id = task.parent_id().cloned();
-    let base = db.base_path().to_owned();
 
     // Cancel the task
     let task = db.get_task_mut(task_id).unwrap();
@@ -741,8 +740,8 @@ pub fn cancel(
     };
     let comment = Comment::new(generate_id(), comment_text, Timestamp::now());
     task.add_comment(comment);
-    task.write_file(&base)?;
     let cancelled_task = task.clone();
+    db.save_task(&cancelled_task)?;
 
     // Remove the cancelled task ID from any downstream blocked_by lists and unblock
     // tasks whose blocker list becomes empty (Option A: auto-unblock)
@@ -780,17 +779,18 @@ pub fn cancel(
             dep.unblock();
             unblocked_task_ids.push(dep_id.clone());
         }
-        dep.write_file(&base)?;
+        let dep = dep.clone();
+        db.save_task(&dep)?;
     }
 
     // Sync parent state
     if let Some(ref pid) = parent_id {
-        db.sync_parent_state(pid, &base)?;
+        db.sync_parent_state(pid)?;
     }
 
     // Cascade cancellation to downstream dependencies if requested
     let cascaded_task_ids = if cascade {
-        cascade_cancel_downstream(task_id, &goal_id, &downstream_ids, &base, db)?
+        cascade_cancel_downstream(task_id, &goal_id, &downstream_ids, db)?
     } else {
         Vec::new()
     };
@@ -825,8 +825,6 @@ pub fn delete(task_id: &TaskId, db: &mut Database) -> Result<Task> {
     let goal_id = task.goal_id().clone();
     db.delete_task(task_id, &goal_id)?;
 
-    let base = db.base_path().to_owned();
-
     // Remove the deleted task ID from any downstream blocked_by lists so those
     // tasks are not permanently deadlocked waiting on a task that no longer exists.
     let downstream_ids: Vec<TaskId> = db
@@ -849,11 +847,12 @@ pub fn delete(task_id: &TaskId, db: &mut Database) -> Result<Task> {
         if should_unblock {
             dep.unblock();
         }
-        dep.write_file(&base)?;
+        let dep = dep.clone();
+        db.save_task(&dep)?;
     }
 
     if let Some(pid) = parent_id {
-        db.sync_parent_state(&pid, &base)?;
+        db.sync_parent_state(&pid)?;
     }
 
     Ok(task)
@@ -872,10 +871,10 @@ pub fn comment(task_id: &TaskId, text: String, db: &mut Database) -> Result<Task
 
     let comment = Comment::new(generate_id(), text, Timestamp::now());
 
-    let base = db.base_path().to_owned();
     let task = db.get_task_mut(task_id).unwrap();
     task.add_comment(comment);
-    task.write_file(&base)?;
+    let task = task.clone();
+    db.save_task(&task)?;
 
-    Ok(task.clone())
+    Ok(task)
 }

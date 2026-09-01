@@ -6,14 +6,14 @@ use crate::id::{GoalId, TaskId};
 use crate::models::{Contract, Goal, Priority, Task};
 
 pub fn goal(goal_id: &GoalId, description: String, db: &mut Database) -> Result<Goal> {
-    let base = db.base_path().to_path_buf();
     let goal = db
         .get_goal_mut(goal_id)
         .ok_or_else(|| anyhow!("Goal not found: {goal_id}"))?;
 
     goal.set_description(description);
-    goal.write_file(&base)?;
-    Ok(goal.clone())
+    let goal = goal.clone();
+    db.save_goal(&goal)?;
+    Ok(goal)
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -67,7 +67,6 @@ pub fn task(
         }
     }
 
-    let base = db.base_path().to_path_buf();
     let task = db.get_task_mut(task_id).unwrap();
 
     if let Some(desc) = description {
@@ -94,6 +93,7 @@ pub fn task(
         task.set_blocked_by(deps);
     }
 
-    task.write_file(&base)?;
-    Ok(task.clone())
+    let task = task.clone();
+    db.save_task(&task)?;
+    Ok(task)
 }
