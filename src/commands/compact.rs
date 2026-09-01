@@ -16,7 +16,7 @@ pub struct CompactCandidate {
 pub fn analyze(goal: Option<&str>, db: &Database) -> Result<Vec<CompactCandidate>> {
     let goals = match goal {
         Some(id) => {
-            let goal_id: crate::id::GoalId = id.parse().map_err(|e| anyhow!("{e}"))?;
+            let goal_id = db.resolve_any_goal(id).map_err(|e| anyhow!("{e}"))?;
             let g = db
                 .get_goal(&goal_id)
                 .ok_or_else(|| anyhow!("Goal not found: {id}"))?;

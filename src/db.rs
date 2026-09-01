@@ -592,14 +592,19 @@ impl Database {
         let matches: Vec<&GoalId> = self
             .goals
             .keys()
-            .filter(|id| id.as_ref().starts_with(&input_lower))
+            .filter(|id| id.as_ref().to_ascii_lowercase().starts_with(&input_lower))
             .collect();
 
         match matches.len() {
             1 => Ok((*matches[0]).clone()),
             0 => {
-                let candidates: Vec<&str> = self.goals.keys().map(AsRef::as_ref).collect();
-                let suggestion = find_similar_id(&input_lower, &candidates).map(String::from);
+                let candidates: Vec<String> = self
+                    .goals
+                    .keys()
+                    .map(|id| id.as_ref().to_ascii_lowercase())
+                    .collect();
+                let candidate_refs: Vec<&str> = candidates.iter().map(String::as_str).collect();
+                let suggestion = find_similar_id(&input_lower, &candidate_refs).map(String::from);
                 Err(ResolveError::NotFound {
                     input: input.to_string(),
                     suggestion,
@@ -629,14 +634,19 @@ impl Database {
         let matches: Vec<&TaskId> = self
             .tasks
             .keys()
-            .filter(|id| id.as_ref().starts_with(&input_lower))
+            .filter(|id| id.as_ref().to_ascii_lowercase().starts_with(&input_lower))
             .collect();
 
         match matches.len() {
             1 => Ok((*matches[0]).clone()),
             0 => {
-                let candidates: Vec<&str> = self.tasks.keys().map(AsRef::as_ref).collect();
-                let suggestion = find_similar_id(&input_lower, &candidates).map(String::from);
+                let candidates: Vec<String> = self
+                    .tasks
+                    .keys()
+                    .map(|id| id.as_ref().to_ascii_lowercase())
+                    .collect();
+                let candidate_refs: Vec<&str> = candidates.iter().map(String::as_str).collect();
+                let suggestion = find_similar_id(&input_lower, &candidate_refs).map(String::from);
                 Err(ResolveError::NotFound {
                     input: input.to_string(),
                     suggestion,
@@ -1416,6 +1426,41 @@ mod tests {
         assert_eq!(result.unwrap().as_ref(), "abc12345");
     }
 
+    // Regression test for a goal loaded from a pre-existing `.radial/` whose ID was minted
+    // before IDs were generated lowercase-only. `Deserialize` preserves stored case (it must,
+    // since `Goal::file_path` joins the ID directly onto the on-disk directory name), so
+    // resolution has to fold case itself rather than relying on a normalized key.
+    #[rstest]
+    fn resolve_goal_id_legacy_mixed_case(mut db: (TempDir, Database)) {
+        let (_dir, db) = &mut db;
+        let goal1 = Goal::new(
+            goal_id("IKKCVyoO"),
+            None,
+            "Legacy goal".to_string(),
+            GoalState::Pending,
+            Timestamp::now(),
+            Timestamp::now(),
+            None,
+            Metrics::default(),
+        );
+        db.create_goal(goal1).unwrap();
+
+        // Exact original case.
+        let exact = db.resolve_goal_id("IKKCVyoO");
+        assert!(exact.is_ok());
+        assert_eq!(exact.unwrap().as_ref(), "IKKCVyoO");
+
+        // Fully lowercase input, as a user would naturally type.
+        let lower = db.resolve_goal_id("ikkcvyoo");
+        assert!(lower.is_ok());
+        assert_eq!(lower.unwrap().as_ref(), "IKKCVyoO");
+
+        // Lowercase prefix.
+        let prefix = db.resolve_goal_id("ikkc");
+        assert!(prefix.is_ok());
+        assert_eq!(prefix.unwrap().as_ref(), "IKKCVyoO");
+    }
+
     #[rstest]
     fn resolve_task_unique_prefix(mut db: (TempDir, Database)) {
         let (_dir, db) = &mut db;
@@ -1449,6 +1494,50 @@ mod tests {
         let result = db.resolve_task_id("t8z");
         assert!(result.is_ok());
         assert_eq!(result.unwrap().as_ref(), "t8zwarp9");
+    }
+
+    // Regression test mirroring `resolve_goal_id_legacy_mixed_case` for tasks.
+    #[rstest]
+    fn resolve_task_id_legacy_mixed_case(mut db: (TempDir, Database)) {
+        let (_dir, db) = &mut db;
+        let goal = Goal::new(
+            goal_id("g1"),
+            None,
+            "Test goal".to_string(),
+            GoalState::Pending,
+            Timestamp::now(),
+            Timestamp::now(),
+            None,
+            Metrics::default(),
+        );
+        db.create_goal(goal).unwrap();
+
+        let task = crate::models::Task::new(
+            task_id("xYz9Kp2m"),
+            goal_id("g1"),
+            None,
+            None,
+            "Legacy task".to_string(),
+            Priority::default(),
+            None,
+            TaskState::Pending,
+            vec![],
+            Timestamp::now(),
+            Timestamp::now(),
+        );
+        db.create_task(task).unwrap();
+
+        let exact = db.resolve_task_id("xYz9Kp2m");
+        assert!(exact.is_ok());
+        assert_eq!(exact.unwrap().as_ref(), "xYz9Kp2m");
+
+        let lower = db.resolve_task_id("xyz9kp2m");
+        assert!(lower.is_ok());
+        assert_eq!(lower.unwrap().as_ref(), "xYz9Kp2m");
+
+        let prefix = db.resolve_task_id("xyz9");
+        assert!(prefix.is_ok());
+        assert_eq!(prefix.unwrap().as_ref(), "xYz9Kp2m");
     }
 
     #[rstest]

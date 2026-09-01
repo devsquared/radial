@@ -2448,8 +2448,15 @@ fn test_prefix_resolution() {
     assert!(output.contains("First task"));
     assert!(output.contains("Second task"));
 
-    // Test task prefix resolution (3-4 chars)
-    let task_prefix = &task_id_1[..3];
+    // Test task prefix resolution (3-4 chars, extended if needed to stay
+    // unambiguous -- random IDs can share a 3-char prefix by chance).
+    let diverge_at = task_id_1
+        .chars()
+        .zip(task_id_2.chars())
+        .position(|(a, b)| a != b)
+        .map_or(task_id_1.len(), |i| i + 1);
+    let prefix_len = diverge_at.max(3).min(task_id_1.len());
+    let task_prefix = &task_id_1[..prefix_len];
     env.run(&["task", "start", task_prefix, "--assignee", "test-agent"])
         .expect("Start with task prefix failed");
 

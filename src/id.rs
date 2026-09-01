@@ -4,7 +4,8 @@ use std::str::FromStr;
 use serde::{Deserialize, Serialize};
 
 /// Validate that an ID string is 1-8 alphanumeric characters.
-/// Accepts legacy mixed-case IDs and normalizes to lowercase internally.
+/// Accepts mixed-case IDs as-is; case-insensitive matching happens at
+/// resolution time (`Database::resolve_goal_id`/`resolve_task_id`), not here.
 fn validate_id(s: &str) -> Result<(), IdParseError> {
     if s.is_empty() || s.len() > 8 {
         return Err(IdParseError {
@@ -87,7 +88,7 @@ impl FromStr for GoalId {
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         validate_id(s)?;
-        Ok(Self(s.to_ascii_lowercase()))
+        Ok(Self(s.to_owned()))
     }
 }
 
@@ -127,7 +128,7 @@ impl FromStr for TaskId {
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         validate_id(s)?;
-        Ok(Self(s.to_ascii_lowercase()))
+        Ok(Self(s.to_owned()))
     }
 }
 
@@ -220,27 +221,32 @@ mod tests {
 
     #[test]
     fn test_legacy_mixed_case_ids_parse() {
+        // Mixed-case IDs parse successfully and keep their exact case; lowercasing
+        // here would desync from the on-disk directory name for legacy IDs (which
+        // are keyed by `id.as_ref()`), so case-insensitive matching is handled at
+        // resolution time instead (see `Database::resolve_goal_id`).
         let id1: GoalId = "t8zwaROl".parse().unwrap();
-        assert_eq!(id1.as_ref(), "t8zwarol");
+        assert_eq!(id1.as_ref(), "t8zwaROl");
 
         let id2: TaskId = "xYz9Kp2m".parse().unwrap();
-        assert_eq!(id2.as_ref(), "xyz9kp2m");
+        assert_eq!(id2.as_ref(), "xYz9Kp2m");
 
         let id3: GoalId = "V1StGXR8".parse().unwrap();
-        assert_eq!(id3.as_ref(), "v1stgxr8");
+        assert_eq!(id3.as_ref(), "V1StGXR8");
     }
 
     #[test]
-    fn test_case_folding_normalization() {
+    fn test_from_str_preserves_case() {
         let upper: GoalId = "ABCD1234".parse().unwrap();
         let lower: GoalId = "abcd1234".parse().unwrap();
         let mixed: GoalId = "AbCd1234".parse().unwrap();
 
-        assert_eq!(upper.as_ref(), "abcd1234");
+        assert_eq!(upper.as_ref(), "ABCD1234");
         assert_eq!(lower.as_ref(), "abcd1234");
-        assert_eq!(mixed.as_ref(), "abcd1234");
-        assert_eq!(upper.as_ref(), lower.as_ref());
-        assert_eq!(lower.as_ref(), mixed.as_ref());
+        assert_eq!(mixed.as_ref(), "AbCd1234");
+        // Distinct case means distinct values at this layer -- equality here is
+        // exact, not case-folded.
+        assert_ne!(upper, lower);
     }
 
     #[test]
