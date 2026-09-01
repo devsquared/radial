@@ -5,15 +5,15 @@ use anyhow::Result;
 use console::style;
 use serde::Serialize;
 
-use crate::commands::clean::CleanResult;
-use crate::commands::compact::CompactCandidate;
-use crate::commands::init::InitResult;
-use crate::commands::list::GoalWithTasks;
-use crate::commands::show::ShowResult;
-use crate::commands::status::{GoalSummary, StatusResult};
-use crate::commands::task::{CancelResult, CompleteResult};
 use crate::id::TaskId;
 use crate::models::{Goal, Metrics, Task, TaskState};
+use crate::ops::clean::CleanResult;
+use crate::ops::compact::CompactCandidate;
+use crate::ops::init::InitResult;
+use crate::ops::list::GoalWithTasks;
+use crate::ops::show::ShowResult;
+use crate::ops::status::{GoalSummary, StatusResult};
+use crate::ops::task::{CancelResult, CompleteResult};
 
 /// Trait for types that can render themselves as human-readable CLI output.
 pub trait Render {
@@ -785,10 +785,7 @@ fn status_task(task: &Task, opts: &RenderOptions) -> Result<()> {
     })
 }
 
-fn status_goal(
-    goal_status: &crate::commands::status::GoalStatus,
-    opts: &RenderOptions,
-) -> Result<()> {
+fn status_goal(goal_status: &crate::ops::status::GoalStatus, opts: &RenderOptions) -> Result<()> {
     let desc_w = opts.desc_width(49);
     json_or(goal_status, opts, |w| {
         let goal = goal_status.goal();

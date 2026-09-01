@@ -3,12 +3,12 @@
 #![allow(clippy::must_use_candidate)]
 
 pub mod cli;
-pub mod commands;
 pub mod db;
 pub mod duration;
 pub mod helpers;
 pub mod id;
 pub mod models;
+pub mod ops;
 pub mod output;
 
 use anyhow::{Context, Result, anyhow};
@@ -95,16 +95,16 @@ fn ensure_initialized_for_read() -> Result<(Database, DbLock)> {
 fn run_goal(goal_cmd: GoalCommands, db: &mut Database) -> Result<()> {
     match goal_cmd {
         GoalCommands::Create { description, json } => {
-            let goal = commands::goal::create(description, db)?;
+            let goal = ops::goal::create(description, db)?;
             output::goal_created(&goal, &RenderOptions::new().json(json))
         }
         GoalCommands::List { json } => {
-            let goals = commands::goal::list(db);
+            let goals = ops::goal::list(db);
             output::goal_list(&goals, &RenderOptions::new().json(json))
         }
         GoalCommands::Cancel { goal_id, reason } => {
             let goal_id = db.resolve_goal_id(&goal_id).map_err(|e| anyhow!("{e}"))?;
-            let (goal, cancelled_task_ids) = commands::goal::cancel(&goal_id, reason, "cli", db)?;
+            let (goal, cancelled_task_ids) = ops::goal::cancel(&goal_id, reason, "cli", db)?;
             output::goal_cancelled(&goal, &cancelled_task_ids)
         }
     }
@@ -129,7 +129,7 @@ fn run_task(task_cmd: TaskCommands, db: &mut Database) -> Result<()> {
                 .map(|p| db.resolve_any_task(&p).map_err(|e| anyhow!("{e}")))
                 .transpose()?;
             let prio = priority.unwrap_or_default();
-            let task = commands::task::create(
+            let task = ops::task::create(
                 &goal_id,
                 description,
                 prio,
@@ -151,7 +151,7 @@ fn run_task(task_cmd: TaskCommands, db: &mut Database) -> Result<()> {
             full,
         } => {
             let goal_id = db.resolve_any_goal(&goal_id).map_err(|e| anyhow!("{e}"))?;
-            let tasks = commands::task::list(&goal_id, priority.as_ref(), assignee.as_deref(), db)?;
+            let tasks = ops::task::list(&goal_id, priority.as_ref(), assignee.as_deref(), db)?;
             let goal = db
                 .get_goal(&goal_id)
                 .ok_or_else(|| anyhow!("Goal not found: {goal_id}"))?;
@@ -167,7 +167,7 @@ fn run_task(task_cmd: TaskCommands, db: &mut Database) -> Result<()> {
             force,
         } => {
             let task_id = db.resolve_any_task(&task_id).map_err(|e| anyhow!("{e}"))?;
-            let task = commands::task::start(&task_id, &assignee, force, db)?;
+            let task = ops::task::start(&task_id, &assignee, force, db)?;
             output::task_started(&task)
         }
         TaskCommands::Complete {
@@ -179,7 +179,7 @@ fn run_task(task_cmd: TaskCommands, db: &mut Database) -> Result<()> {
         } => {
             let task_id = db.resolve_any_task(&task_id).map_err(|e| anyhow!("{e}"))?;
             let complete_result =
-                commands::task::complete(&task_id, result, artifacts, tokens, elapsed, db)?;
+                ops::task::complete(&task_id, result, artifacts, tokens, elapsed, db)?;
             output::task_completed(&complete_result)
         }
         TaskCommands::Fail {
@@ -188,7 +188,7 @@ fn run_task(task_cmd: TaskCommands, db: &mut Database) -> Result<()> {
             compact,
         } => {
             let task_id = db.resolve_any_task(&task_id).map_err(|e| anyhow!("{e}"))?;
-            let task = commands::task::fail(&task_id, reason, compact, db)?;
+            let task = ops::task::fail(&task_id, reason, compact, db)?;
             output::task_failed(&task)
         }
         TaskCommands::Cancel {
@@ -197,12 +197,12 @@ fn run_task(task_cmd: TaskCommands, db: &mut Database) -> Result<()> {
             cascade,
         } => {
             let task_id = db.resolve_any_task(&task_id).map_err(|e| anyhow!("{e}"))?;
-            let result = commands::task::cancel(&task_id, reason, "cli", cascade, db)?;
+            let result = ops::task::cancel(&task_id, reason, "cli", cascade, db)?;
             output::task_cancelled(&result)
         }
         TaskCommands::Retry { task_id } => {
             let task_id = db.resolve_any_task(&task_id).map_err(|e| anyhow!("{e}"))?;
-            let task = commands::task::retry(&task_id, db)?;
+            let task = ops::task::retry(&task_id, db)?;
             output::task_retry(&task)
         }
         TaskCommands::Release {
@@ -214,14 +214,14 @@ fn run_task(task_cmd: TaskCommands, db: &mut Database) -> Result<()> {
                 let task_id = db
                     .resolve_any_task(task_id_str)
                     .map_err(|e| anyhow!("{e}"))?;
-                let task = commands::task::release(&task_id, db)?;
+                let task = ops::task::release(&task_id, db)?;
                 output::task_released(&task)
             } else if let Some(duration_str) = stale {
                 let threshold = crate::duration::parse_duration(&duration_str)?;
-                let tasks = commands::task::release_stale(threshold, db)?;
+                let tasks = ops::task::release_stale(threshold, db)?;
                 output::tasks_released_stale(&tasks)
             } else if all_in_progress {
-                let tasks = commands::task::release_all_in_progress(db)?;
+                let tasks = ops::task::release_all_in_progress(db)?;
                 output::tasks_released_all_in_progress(&tasks)
             } else {
                 Err(anyhow!(
@@ -231,17 +231,17 @@ fn run_task(task_cmd: TaskCommands, db: &mut Database) -> Result<()> {
         }
         TaskCommands::Delete { task_id } => {
             let task_id = db.resolve_any_task(&task_id).map_err(|e| anyhow!("{e}"))?;
-            let task = commands::task::delete(&task_id, db)?;
+            let task = ops::task::delete(&task_id, db)?;
             output::task_deleted(&task)
         }
         TaskCommands::Comment { task_id, text } => {
             let task_id = db.resolve_any_task(&task_id).map_err(|e| anyhow!("{e}"))?;
-            let task = commands::task::comment(&task_id, text, db)?;
+            let task = ops::task::comment(&task_id, text, db)?;
             output::task_commented(&task, &RenderOptions::new())
         }
         TaskCommands::Comments { task_id } => {
             let task_id = db.resolve_any_task(&task_id).map_err(|e| anyhow!("{e}"))?;
-            let task = commands::task::comments(&task_id, db)?;
+            let task = ops::task::comments(&task_id, db)?;
             output::task_comments(&task, &RenderOptions::new())
         }
     }
@@ -251,7 +251,7 @@ fn run_task(task_cmd: TaskCommands, db: &mut Database) -> Result<()> {
 pub fn run(cli: Cli) -> Result<()> {
     match cli.command {
         Commands::Init { stealth } => {
-            let result = commands::init::run(stealth)?;
+            let result = ops::init::run(stealth)?;
             output::init(&result)
         }
         Commands::Goal(goal_cmd) => {
@@ -265,9 +265,9 @@ pub fn run(cli: Cli) -> Result<()> {
         } => {
             let (db, _guard) = ensure_initialized_for_read()?;
             let results = if archived {
-                commands::list::run_archived(&db)?
+                ops::list::run_archived(&db)?
             } else {
-                commands::list::run(&db)?
+                ops::list::run(&db)?
             };
             output::list(&results, &RenderOptions::new().json(json).full(full))
         }
@@ -283,7 +283,7 @@ pub fn run(cli: Cli) -> Result<()> {
                     description,
                 } => {
                     let goal_id = db.resolve_any_goal(&goal_id).map_err(|e| anyhow!("{e}"))?;
-                    let goal = commands::edit::goal(&goal_id, description, &mut db)?;
+                    let goal = ops::edit::goal(&goal_id, description, &mut db)?;
                     output::goal_edited(&goal)
                 }
                 EditCommands::Task {
@@ -296,7 +296,7 @@ pub fn run(cli: Cli) -> Result<()> {
                     blocked_by,
                 } => {
                     let task_id = db.resolve_any_task(&task_id).map_err(|e| anyhow!("{e}"))?;
-                    let task = commands::edit::task(
+                    let task = ops::edit::task(
                         &task_id,
                         description,
                         priority,
@@ -323,17 +323,17 @@ pub fn run(cli: Cli) -> Result<()> {
             let task = task
                 .map(|t| db.resolve_any_task(&t).map_err(|e| anyhow!("{e}")))
                 .transpose()?;
-            let result = commands::status::run(goal, task, assignee, &db)?;
+            let result = ops::status::run(goal, task, assignee, &db)?;
             output::status(&result, &RenderOptions::new().json(json))
         }
         Commands::Show { id, json } => {
             let (db, _guard) = ensure_initialized_for_read()?;
-            let result = commands::show::run(&id, &db)?;
+            let result = ops::show::run(&id, &db)?;
             output::show(&result, &RenderOptions::new().json(json))
         }
         Commands::Clean { all, force, purge } => {
             let (mut db, _guard) = ensure_initialized_for_write()?;
-            let result = commands::clean::run(
+            let result = ops::clean::run(
                 all,
                 force,
                 purge,
@@ -345,7 +345,7 @@ pub fn run(cli: Cli) -> Result<()> {
         }
         Commands::Restore { goal_id } => {
             let (mut db, _guard) = ensure_initialized_for_write()?;
-            let goal = commands::restore::run(&goal_id, &mut db)?;
+            let goal = ops::restore::run(&goal_id, &mut db)?;
             output::goal_restored(&goal)
         }
         Commands::Ready {
@@ -355,29 +355,28 @@ pub fn run(cli: Cli) -> Result<()> {
         } => {
             let (db, _guard) = ensure_initialized_for_read()?;
             let goal_id = db.resolve_any_goal(&goal_id).map_err(|e| anyhow!("{e}"))?;
-            let ready = commands::ready::run(&goal_id, priority.as_ref(), &db)?;
+            let ready = ops::ready::run(&goal_id, priority.as_ref(), &db)?;
             let goal = db
                 .get_goal(&goal_id)
                 .ok_or_else(|| anyhow!("Goal not found: {goal_id}"))?;
             let stale_count =
-                commands::task::find_stale_tasks(jiff::SignedDuration::from_secs(2 * 3600), &db)
-                    .len();
+                ops::task::find_stale_tasks(jiff::SignedDuration::from_secs(2 * 3600), &db).len();
             output::ready_tasks(&ready, goal, stale_count, &RenderOptions::new().json(json))
         }
         Commands::Prep => {
             let (db, _guard) = ensure_initialized_for_read()?;
-            let text = commands::prep::run(&db);
+            let text = ops::prep::run(&db);
             output::prep(&text)
         }
         Commands::Compact(compact_cmd) => {
             let (mut db, _guard) = ensure_initialized_for_write()?;
             match compact_cmd {
                 CompactCommands::Analyze { goal, json } => {
-                    let candidates = commands::compact::analyze(goal.as_deref(), &db)?;
+                    let candidates = ops::compact::analyze(goal.as_deref(), &db)?;
                     output::compact_analyze(&candidates, &RenderOptions::new().json(json))
                 }
                 CompactCommands::Apply { task_id, summary } => {
-                    let id = commands::compact::apply(&task_id, summary, &mut db)?;
+                    let id = ops::compact::apply(&task_id, summary, &mut db)?;
                     output::compact_apply(&id)
                 }
             }
