@@ -5,7 +5,9 @@ use anyhow::Result;
 use console::style;
 use serde::Serialize;
 
+use crate::commands::clean::CleanResult;
 use crate::commands::compact::CompactCandidate;
+use crate::commands::init::InitResult;
 use crate::commands::list::GoalWithTasks;
 use crate::commands::show::ShowResult;
 use crate::commands::status::{GoalSummary, StatusResult};
@@ -299,6 +301,93 @@ pub fn goal_restored(goal: &Goal) -> Result<()> {
         style(goal.id()).cyan().bold()
     )?;
     writeln!(w, "  {}", truncate(goal.description(), 80))?;
+    Ok(())
+}
+
+// -- Clean outputs --
+
+/// Prompt for confirmation before archiving or deleting a single goal.
+pub fn confirm_clean(goal: &Goal, purge: bool) -> Result<bool> {
+    let mut stdout = io::stdout().lock();
+    let action = if purge { "Delete" } else { "Archive" };
+    write!(
+        stdout,
+        "{} {} [{}] {}? [y/N] ",
+        action,
+        style(goal.id()).cyan().bold(),
+        style(goal.state().as_ref()).dim(),
+        truncate(goal.description(), 50),
+    )?;
+    stdout.flush()?;
+
+    let mut input = String::new();
+    io::stdin().read_line(&mut input)?;
+    Ok(input.trim().eq_ignore_ascii_case("y"))
+}
+
+/// Report a single goal having just been archived or deleted.
+pub fn clean_removed(goal: &Goal, purge: bool) -> Result<()> {
+    let mut w = io::stdout().lock();
+    if purge {
+        writeln!(
+            w,
+            "  {} {} — {}",
+            style("Deleted").red(),
+            style(goal.id()).cyan(),
+            truncate(goal.description(), 60),
+        )?;
+    } else {
+        writeln!(
+            w,
+            "  {} {} — {}",
+            style("Archived").dim(),
+            style(goal.id()).cyan(),
+            truncate(goal.description(), 60),
+        )?;
+    }
+    Ok(())
+}
+
+pub fn clean(result: &CleanResult) -> Result<()> {
+    let mut w = io::stdout().lock();
+    if result.candidates == 0 {
+        let msg = if result.force {
+            "No goals found."
+        } else {
+            "No completed or cancelled goals to clean."
+        };
+        writeln!(w, "{msg}")?;
+        return Ok(());
+    }
+
+    let action = if result.purge { "Deleted" } else { "Archived" };
+    writeln!(
+        w,
+        "\n{} {} goal(s).",
+        action,
+        style(result.removed.len()).bold()
+    )?;
+    Ok(())
+}
+
+// -- Init outputs --
+
+pub fn init(result: &InitResult) -> Result<()> {
+    let mut w = io::stdout().lock();
+    if result.already_initialized {
+        writeln!(
+            w,
+            "Radial already initialized in {}",
+            result.radial_dir.display()
+        )?;
+        return Ok(());
+    }
+
+    if let Some(target) = result.gitignore_target {
+        writeln!(w, "Added .radial to {}", target.display_path())?;
+    }
+
+    writeln!(w, "Initialized radial in {}", result.radial_dir.display())?;
     Ok(())
 }
 

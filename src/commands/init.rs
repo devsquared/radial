@@ -1,17 +1,43 @@
 use anyhow::{Context, Result};
 use std::fs::{self, OpenOptions};
 use std::io::Write;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use crate::RADIAL_DIR;
 use crate::db::Database;
 
-pub fn run(stealth: bool) -> Result<()> {
-    let radial_dir = std::path::PathBuf::from(RADIAL_DIR);
+/// Where `.radial` got added for git exclusion, if it did.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GitignoreTarget {
+    Exclude,
+    Gitignore,
+}
+
+impl GitignoreTarget {
+    pub fn display_path(self) -> &'static str {
+        match self {
+            GitignoreTarget::Exclude => ".git/info/exclude",
+            GitignoreTarget::Gitignore => ".gitignore",
+        }
+    }
+}
+
+#[derive(Debug)]
+pub struct InitResult {
+    pub radial_dir: PathBuf,
+    pub already_initialized: bool,
+    pub gitignore_target: Option<GitignoreTarget>,
+}
+
+pub fn run(stealth: bool) -> Result<InitResult> {
+    let radial_dir = PathBuf::from(RADIAL_DIR);
 
     if radial_dir.exists() {
-        println!("Radial already initialized in {}", radial_dir.display());
-        return Ok(());
+        return Ok(InitResult {
+            radial_dir,
+            already_initialized: true,
+            gitignore_target: None,
+        });
     }
 
     fs::create_dir_all(&radial_dir).context("Failed to create .radial directory")?;
@@ -19,29 +45,31 @@ pub fn run(stealth: bool) -> Result<()> {
     let db = Database::open(&radial_dir)?;
     db.init_schema()?;
 
-    if stealth {
-        add_to_gitignore()?;
-    }
+    let gitignore_target = if stealth { add_to_gitignore()? } else { None };
 
-    println!("Initialized radial in {}", radial_dir.display());
-    Ok(())
+    Ok(InitResult {
+        radial_dir,
+        already_initialized: false,
+        gitignore_target,
+    })
 }
 
 /// Adds `.radial` to git exclusions.
 /// Prefers `.git/info/exclude` if it exists (truly local), otherwise uses `.gitignore`.
-fn add_to_gitignore() -> Result<()> {
+/// Returns `None` if `.radial` was already excluded or we're not in a git repo.
+fn add_to_gitignore() -> Result<Option<GitignoreTarget>> {
     let exclude_path = Path::new(".git/info/exclude");
     let gitignore_path = Path::new(".gitignore");
 
     // Prefer .git/info/exclude for truly local exclusion
-    let target_path = if exclude_path.exists() {
-        exclude_path
+    let (target_path, target) = if exclude_path.exists() {
+        (exclude_path, GitignoreTarget::Exclude)
     } else if gitignore_path.exists() || Path::new(".git").is_dir() {
         // If we're in a git repo, create/use .gitignore
-        gitignore_path
+        (gitignore_path, GitignoreTarget::Gitignore)
     } else {
         // Not a git repo, skip
-        return Ok(());
+        return Ok(None);
     };
 
     // Check if already excluded
@@ -51,7 +79,7 @@ fn add_to_gitignore() -> Result<()> {
             .lines()
             .any(|line| line.trim() == ".radial" || line.trim() == ".radial/");
         if has_radial {
-            return Ok(());
+            return Ok(None);
         }
     }
 
@@ -72,12 +100,5 @@ fn add_to_gitignore() -> Result<()> {
 
     writeln!(file, ".radial")?;
 
-    let path_display = if target_path == exclude_path {
-        ".git/info/exclude"
-    } else {
-        ".gitignore"
-    };
-    println!("Added .radial to {path_display}");
-
-    Ok(())
+    Ok(Some(target))
 }

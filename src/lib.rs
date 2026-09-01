@@ -250,7 +250,10 @@ fn run_task(task_cmd: TaskCommands, db: &mut Database) -> Result<()> {
 #[allow(clippy::too_many_lines)]
 pub fn run(cli: Cli) -> Result<()> {
     match cli.command {
-        Commands::Init { stealth } => commands::init::run(stealth),
+        Commands::Init { stealth } => {
+            let result = commands::init::run(stealth)?;
+            output::init(&result)
+        }
         Commands::Goal(goal_cmd) => {
             let (mut db, _guard) = ensure_initialized_for_write()?;
             run_goal(goal_cmd, &mut db)
@@ -330,7 +333,15 @@ pub fn run(cli: Cli) -> Result<()> {
         }
         Commands::Clean { all, force, purge } => {
             let (mut db, _guard) = ensure_initialized_for_write()?;
-            commands::clean::run(all, force, purge, &mut db)
+            let result = commands::clean::run(
+                all,
+                force,
+                purge,
+                &mut db,
+                output::confirm_clean,
+                output::clean_removed,
+            )?;
+            output::clean(&result)
         }
         Commands::Restore { goal_id } => {
             let (mut db, _guard) = ensure_initialized_for_write()?;
