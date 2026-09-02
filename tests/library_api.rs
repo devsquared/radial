@@ -1,7 +1,5 @@
 //! Drives radial purely as a library, through `ops` alone, to prove the crate
-//! is usable as a dependency and not only via the `rd` binary. See
-//! `PR 6` in the core-seam plan: this is the forcing function for the
-//! re-export list PR 7 has to produce.
+//! is usable as a dependency and not only via the `rd` binary.
 
 use radial::db::Database;
 use radial::models::{GoalState, Priority, TaskState};
