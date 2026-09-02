@@ -1,14 +1,20 @@
 # Radial
 
+[![Crates.io](https://img.shields.io/crates/v/radial.svg)](https://crates.io/crates/radial)
+[![docs.rs](https://img.shields.io/docsrs/radial)](https://docs.rs/radial)
+[![CI](https://github.com/devsquared/radial/actions/workflows/ci.yml/badge.svg)](https://github.com/devsquared/radial/actions/workflows/ci.yml)
+[![License](https://img.shields.io/crates/l/radial.svg)](LICENSE)
+
 Task orchestration for LLM agents. Break down goals into tracked, contract-bound tasks with clear inputs, outputs, and verification.
 
 ## Table of Contents
 
 - [Highlights](#highlights)
 - [Overview](#overview)
-- [Usage](#usage)
 - [Installation](#installation)
+- [Usage](#usage)
 - [Contributing](#contributing)
+- [Roadmap and changelog](#roadmap-and-changelog)
 
 ## Highlights
 
@@ -30,6 +36,24 @@ Task orchestration for LLM agents. Break down goals into tracked, contract-bound
 Radial is a CLI tool that brings structure to agentic workflows. Instead of handing an LLM a vague goal, you break work into tasks with contracts: what goes in, what comes out, and how to check it worked. This gives agents clear boundaries, verifiable completion criteria, and better handoffs between steps.
 
 I built Radial after noticing that LLM agents produce significantly better results when given explicit verification instructions tied back to a main goal. Inspired by [Beads](https://github.com/steveyegge/beads), Radial takes contracts as its core primitive.
+
+## Installation
+
+Install from crates.io:
+
+```bash
+cargo install radial
+```
+
+Or build from source:
+
+```bash
+git clone https://github.com/devsquared/radial
+cd radial
+cargo install --path .
+```
+
+Either way, this places the `rd` binary in your Cargo bin directory.
 
 ## Usage
 
@@ -233,22 +257,15 @@ your-project/
 └── ...
 ```
 
-## Installation
-
-Build from source with Cargo:
-
-```bash
-git clone https://github.com/devsquared/radial
-cd radial
-cargo install --path .
-```
-
-This places the `rd` binary in your Cargo bin directory.
-
 ## Contributing
 
-Contributions are welcome! See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines on building, testing, and submitting changes.
+Contributions are welcome! See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines on building, testing, and submitting changes, and [AGENTS.md](AGENTS.md) for code-level conventions.
+
+## Roadmap and changelog
+
+- [ROADMAP.md](ROADMAP.md) — where the project is headed, in order
+- [CHANGELOG.md](CHANGELOG.md) — release history, generated from commit history
 
 ## License
 
-MIT
+[MIT](LICENSE)
