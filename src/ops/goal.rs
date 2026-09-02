@@ -1,11 +1,11 @@
 use anyhow::{Result, anyhow};
 use jiff::Timestamp;
 
-use crate::commands::task;
 use crate::db::Database;
 use crate::helpers::find_similar_id;
 use crate::id::{GoalId, TaskId};
 use crate::models::{Goal, GoalState, Metrics, TaskState};
+use crate::ops::task;
 
 pub fn create(description: String, db: &mut Database) -> Result<Goal> {
     let now = Timestamp::now();
