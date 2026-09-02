@@ -11,6 +11,7 @@ use crate::id::{GoalId, TaskId};
 #[serde(rename_all = "lowercase")]
 #[strum(serialize_all = "lowercase")]
 #[derive(Default, clap::ValueEnum)]
+#[non_exhaustive]
 pub enum Priority {
     P0,
     P1,
@@ -105,7 +106,7 @@ pub struct Task {
 
 impl Task {
     #[allow(clippy::too_many_arguments)]
-    pub fn new(
+    pub(crate) fn new(
         id: TaskId,
         goal_id: GoalId,
         seq: Option<u32>,
@@ -142,8 +143,9 @@ impl Task {
         }
     }
 
+    #[cfg(test)]
     #[must_use]
-    pub fn with_metrics(mut self, metrics: TaskMetrics) -> Self {
+    pub(crate) fn with_metrics(mut self, metrics: TaskMetrics) -> Self {
         self.metrics = metrics;
         self
     }
@@ -171,7 +173,7 @@ impl Task {
 
     /// Compute and set the `display_ref_field` based on the `seq` and `goal_seq`.
     /// Called after deserialization to populate the computed field.
-    pub fn compute_display_ref(&mut self, goal_seq: u32) {
+    pub(crate) fn compute_display_ref(&mut self, goal_seq: u32) {
         self.display_ref_field = self.seq.map(|s| format!("g{goal_seq}.{s}"));
     }
 
@@ -233,7 +235,7 @@ impl Task {
 
     /// Compact this task by replacing heavy fields with a summary.
     /// Only valid for Completed or Failed tasks that aren't already compacted.
-    pub fn compact(&mut self, summary: String) -> bool {
+    pub(crate) fn compact(&mut self, summary: String) -> bool {
         if self.compacted {
             return false;
         }
@@ -250,7 +252,7 @@ impl Task {
     }
 
     /// Set state directly for parent tasks whose state is derived from subtasks.
-    pub fn set_derived_state(&mut self, state: TaskState) {
+    pub(crate) fn set_derived_state(&mut self, state: TaskState) {
         self.state = state;
         let now = Timestamp::now();
         self.updated_at = now;
@@ -259,22 +261,22 @@ impl Task {
         }
     }
 
-    pub fn set_description(&mut self, description: String) {
+    pub(crate) fn set_description(&mut self, description: String) {
         self.description = description;
         self.updated_at = Timestamp::now();
     }
 
-    pub fn set_priority(&mut self, priority: Priority) {
+    pub(crate) fn set_priority(&mut self, priority: Priority) {
         self.priority = priority;
         self.updated_at = Timestamp::now();
     }
 
-    pub fn set_contract(&mut self, contract: Contract) {
+    pub(crate) fn set_contract(&mut self, contract: Contract) {
         self.contract = Some(contract);
         self.updated_at = Timestamp::now();
     }
 
-    pub fn set_blocked_by(&mut self, blocked_by: Vec<TaskId>) {
+    pub(crate) fn set_blocked_by(&mut self, blocked_by: Vec<TaskId>) {
         self.blocked_by = blocked_by;
         self.updated_at = Timestamp::now();
     }
@@ -287,12 +289,12 @@ impl Task {
         self.started_at
     }
 
-    pub fn set_assignee(&mut self, assignee: Option<String>) {
+    pub(crate) fn set_assignee(&mut self, assignee: Option<String>) {
         self.assignee = assignee;
         self.updated_at = Timestamp::now();
     }
 
-    pub fn release(&mut self) -> bool {
+    pub(crate) fn release(&mut self) -> bool {
         if self.assignee.is_none() {
             return false;
         }
@@ -303,20 +305,7 @@ impl Task {
         true
     }
 
-    pub fn transition(&mut self, from: TaskState, to: TaskState) -> bool {
-        if self.state != from {
-            return false;
-        }
-        self.state = to;
-        let now = Timestamp::now();
-        self.updated_at = now;
-        if to == TaskState::InProgress {
-            self.started_at = Some(now);
-        }
-        true
-    }
-
-    pub fn transition_from_any(&mut self, from: &[TaskState], to: TaskState) -> bool {
+    pub(crate) fn transition_from_any(&mut self, from: &[TaskState], to: TaskState) -> bool {
         if !from.contains(&self.state) {
             return false;
         }
@@ -329,7 +318,7 @@ impl Task {
         true
     }
 
-    pub fn complete(&mut self, outcome: Outcome, metrics: TaskMetrics) -> bool {
+    pub(crate) fn complete(&mut self, outcome: Outcome, metrics: TaskMetrics) -> bool {
         if self.state != TaskState::InProgress {
             return false;
         }
@@ -342,7 +331,7 @@ impl Task {
         true
     }
 
-    pub fn retry(&mut self) -> bool {
+    pub(crate) fn retry(&mut self) -> bool {
         if self.state != TaskState::Failed {
             return false;
         }
@@ -354,7 +343,7 @@ impl Task {
         true
     }
 
-    pub fn cancel(&mut self) -> bool {
+    pub(crate) fn cancel(&mut self) -> bool {
         // Cancelled is terminal - already cancelled tasks cannot be re-cancelled
         if self.state == TaskState::Cancelled {
             return false;
@@ -369,17 +358,17 @@ impl Task {
         true
     }
 
-    pub fn unblock(&mut self) {
+    pub(crate) fn unblock(&mut self) {
         self.state = TaskState::Pending;
         self.updated_at = Timestamp::now();
     }
 
-    pub fn add_comment(&mut self, comment: Comment) {
+    pub(crate) fn add_comment(&mut self, comment: Comment) {
         self.comments.push(comment);
         self.updated_at = Timestamp::now();
     }
 
-    pub fn set_result(&mut self, outcome: Outcome) {
+    pub(crate) fn set_result(&mut self, outcome: Outcome) {
         self.result = Some(outcome);
         self.updated_at = Timestamp::now();
     }
@@ -395,8 +384,8 @@ mod tests {
     fn task() -> Task {
         let now = Timestamp::now();
         Task {
-            id: TaskId::from("t_abc123".to_string()),
-            goal_id: GoalId::from("g_xyz789".to_string()),
+            id: TaskId::new_unchecked("t_abc123".to_string()),
+            goal_id: GoalId::new_unchecked("g_xyz789".to_string()),
             seq: None,
             display_ref_field: None,
             parent_id: None,
@@ -418,11 +407,11 @@ mod tests {
         }
     }
 
-    // -- transition --
+    // -- transition_from_any --
 
-    // transition() only succeeds when the task's current state matches `from`.
-    // Cases where initial == from should succeed; mismatches should leave the
-    // task unchanged with its original updated_at timestamp.
+    // transition_from_any() only succeeds when the task's current state is in
+    // `from`. Cases where initial is in `from` should succeed; mismatches
+    // should leave the task unchanged with its original updated_at timestamp.
     #[rstest]
     #[case::matching_pending(TaskState::Pending, TaskState::Pending, TaskState::InProgress, true)]
     #[case::matching_in_progress(
@@ -438,7 +427,7 @@ mod tests {
         false
     )]
     #[case::mismatch_failed(TaskState::Failed, TaskState::Pending, TaskState::InProgress, false)]
-    fn transition_checks_current_state(
+    fn transition_from_any_checks_current_state(
         mut task: Task,
         #[case] initial: TaskState,
         #[case] from: TaskState,
@@ -447,7 +436,7 @@ mod tests {
     ) {
         task.state = initial;
         let before = task.updated_at;
-        let result = task.transition(from, to);
+        let result = task.transition_from_any(&[from], to);
         assert_eq!(result, expected);
         if expected {
             assert_eq!(task.state, to);
@@ -457,8 +446,6 @@ mod tests {
             assert_eq!(task.updated_at, before);
         }
     }
-
-    // -- transition_from_any --
 
     // transition_from_any() accepts a list of valid source states.
     // Only states in the list should transition; others are rejected.
@@ -662,7 +649,7 @@ mod tests {
     #[rstest]
     fn transition_to_in_progress_sets_started_at(mut task: Task) {
         assert!(task.started_at.is_none());
-        task.transition(TaskState::Pending, TaskState::InProgress);
+        task.transition_from_any(&[TaskState::Pending], TaskState::InProgress);
         assert!(task.started_at.is_some());
     }
 
@@ -670,7 +657,7 @@ mod tests {
     #[rstest]
     fn transition_to_other_state_does_not_set_started_at(mut task: Task) {
         task.state = TaskState::InProgress;
-        task.transition(TaskState::InProgress, TaskState::Completed);
+        task.transition_from_any(&[TaskState::InProgress], TaskState::Completed);
         assert!(task.started_at.is_none());
     }
 

@@ -108,7 +108,7 @@ pub struct Goal {
 
 impl Goal {
     #[allow(clippy::too_many_arguments)]
-    pub fn new(
+    pub(crate) fn new(
         id: GoalId,
         seq: Option<u32>,
         description: String,
@@ -170,43 +170,43 @@ impl Goal {
         &self.metrics
     }
 
-    pub fn set_metrics(&mut self, metrics: Metrics) {
+    pub(crate) fn set_metrics(&mut self, metrics: Metrics) {
         self.metrics = metrics;
     }
 
-    pub fn set_description(&mut self, description: String) {
+    pub(crate) fn set_description(&mut self, description: String) {
         self.description = description;
         self.updated_at = Timestamp::now();
     }
 
-    pub fn touch(&mut self) {
+    pub(crate) fn touch(&mut self) {
         self.updated_at = Timestamp::now();
     }
 
     /// Compute and set the `display_ref_field` based on the `seq`.
     /// Called after deserialization to populate the computed field.
-    pub fn compute_display_ref(&mut self) {
+    pub(crate) fn compute_display_ref(&mut self) {
         self.display_ref_field = self.seq.map(|s| format!("g{s}"));
     }
 
-    pub fn mark_in_progress(&mut self) {
+    pub(crate) fn mark_in_progress(&mut self) {
         self.state = GoalState::InProgress;
         self.updated_at = Timestamp::now();
     }
 
-    pub fn mark_completed(&mut self) {
+    pub(crate) fn mark_completed(&mut self) {
         self.state = GoalState::Completed;
         let now = Timestamp::now();
         self.updated_at = now;
         self.completed_at = Some(now);
     }
 
-    pub fn mark_failed(&mut self) {
+    pub(crate) fn mark_failed(&mut self) {
         self.state = GoalState::Failed;
         self.updated_at = Timestamp::now();
     }
 
-    pub fn mark_cancelled(&mut self) {
+    pub(crate) fn mark_cancelled(&mut self) {
         self.state = GoalState::Cancelled;
         self.updated_at = Timestamp::now();
     }
@@ -219,7 +219,7 @@ mod tests {
     #[test]
     fn display_ref_with_seq() {
         let goal = Goal::new(
-            GoalId::from("test123".to_string()),
+            GoalId::new_unchecked("test123".to_string()),
             Some(5),
             "Test goal".to_string(),
             GoalState::Pending,
@@ -234,7 +234,7 @@ mod tests {
     #[test]
     fn display_ref_without_seq() {
         let goal = Goal::new(
-            GoalId::from("test123".to_string()),
+            GoalId::new_unchecked("test123".to_string()),
             None,
             "Test goal".to_string(),
             GoalState::Pending,

@@ -6,7 +6,7 @@ use crate::models::Goal;
 
 pub fn run(goal_id_str: &str, db: &mut Database) -> Result<Goal> {
     // Try to resolve as full ID or prefix
-    let goal_id = GoalId::from(goal_id_str.to_string());
+    let goal_id = GoalId::new_unchecked(goal_id_str.to_string());
 
     db.restore_goal(&goal_id)?;
 
