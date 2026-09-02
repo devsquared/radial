@@ -37,6 +37,7 @@ Generated from [conventional commits](https://www.conventionalcommits.org/) with
 - Comments command
 - Better compaction
 - Add database-wide advisory locking to prevent TOCTOU races
+- Add database-wide advisory locking to prevent TOCTOU races
 - Implement safer ID alphabet (Layer 1)
 - Implement prefix resolution (Layer 2)
 - Git-like ref task and goal references
@@ -64,6 +65,7 @@ Generated from [conventional commits](https://www.conventionalcommits.org/) with
 - Lock down the public API surface
 - Add seam check to CI
 - General cleanup pass on JSON coverage, completions, and docs
+- Prepare repo for 0.1 open-source launch
 
 ### Testing
 
