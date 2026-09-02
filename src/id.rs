@@ -63,6 +63,15 @@ impl GoalId {
     pub fn new() -> Self {
         Self(generate_id())
     }
+
+    /// Construct a `GoalId` from a string without validation.
+    ///
+    /// Internal use only, for values already known-valid (loaded from storage,
+    /// freshly generated). External construction should go through `FromStr`
+    /// (validated) or resolution against a `Database`.
+    pub(crate) fn new_unchecked(s: String) -> Self {
+        Self(s)
+    }
 }
 
 impl fmt::Display for GoalId {
@@ -74,12 +83,6 @@ impl fmt::Display for GoalId {
 impl AsRef<str> for GoalId {
     fn as_ref(&self) -> &str {
         &self.0
-    }
-}
-
-impl From<String> for GoalId {
-    fn from(s: String) -> Self {
-        Self(s)
     }
 }
 
@@ -103,6 +106,16 @@ impl TaskId {
     pub fn new() -> Self {
         Self(generate_id())
     }
+
+    /// Construct a `TaskId` from a string without validation.
+    ///
+    /// Test-only: lets fixtures use IDs that would fail `FromStr` (e.g.
+    /// `"t_abc123"`). External construction should go through `FromStr`
+    /// (validated) or resolution against a `Database`.
+    #[cfg(test)]
+    pub(crate) fn new_unchecked(s: String) -> Self {
+        Self(s)
+    }
 }
 
 impl fmt::Display for TaskId {
@@ -114,12 +127,6 @@ impl fmt::Display for TaskId {
 impl AsRef<str> for TaskId {
     fn as_ref(&self) -> &str {
         &self.0
-    }
-}
-
-impl From<String> for TaskId {
-    fn from(s: String) -> Self {
-        Self(s)
     }
 }
 
@@ -164,13 +171,13 @@ mod tests {
 
     #[test]
     fn test_goal_id_display() {
-        let id = GoalId::from("abc12345".to_string());
+        let id = GoalId::new_unchecked("abc12345".to_string());
         assert_eq!(format!("{id}"), "abc12345");
     }
 
     #[test]
     fn test_task_id_display() {
-        let id = TaskId::from("xyz67890".to_string());
+        let id = TaskId::new_unchecked("xyz67890".to_string());
         assert_eq!(format!("{id}"), "xyz67890");
     }
 
@@ -213,9 +220,9 @@ mod tests {
     }
 
     #[test]
-    fn test_from_string_bypasses_validation() {
-        // From<String> is for internal use and does not validate
-        let id = GoalId::from("anything".to_string());
+    fn test_new_unchecked_bypasses_validation() {
+        // new_unchecked is for internal use and does not validate
+        let id = GoalId::new_unchecked("anything".to_string());
         assert_eq!(id.as_ref(), "anything");
     }
 

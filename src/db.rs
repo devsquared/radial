@@ -14,6 +14,7 @@ use crate::models::{Goal, Metrics, Task, TaskState};
 
 /// Error returned when resolving an ID prefix fails.
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub enum ResolveError {
     /// No ID matches the input prefix.
     NotFound {
@@ -107,7 +108,7 @@ fn try_acquire_lock(file: &File, exclusive: bool) -> Result<()> {
 ///
 /// The database-wide lock protects against concurrent modifications.
 /// This function handles crash safety via tmp+rename.
-pub fn atomic_write(path: &Path, content: &[u8]) -> Result<()> {
+pub(crate) fn atomic_write(path: &Path, content: &[u8]) -> Result<()> {
     let temp = path.with_extension("toml.tmp");
     let mut file = File::create(&temp)
         .with_context(|| format!("Failed to create temporary file: {}", temp.display()))?;
@@ -832,11 +833,11 @@ mod tests {
     use tempfile::TempDir;
 
     fn goal_id(s: &str) -> GoalId {
-        GoalId::from(s.to_string())
+        GoalId::new_unchecked(s.to_string())
     }
 
     fn task_id(s: &str) -> TaskId {
-        TaskId::from(s.to_string())
+        TaskId::new_unchecked(s.to_string())
     }
 
     fn make_goal(id: &str) -> Goal {
@@ -1013,7 +1014,7 @@ mod tests {
     fn save_task_overwrites_existing(db_with_goal_and_task: (TempDir, Database)) {
         let (dir, db) = db_with_goal_and_task;
         let mut task = db.get_task(&task_id("t1")).unwrap().clone();
-        task.transition(TaskState::Pending, TaskState::InProgress);
+        task.transition_from_any(&[TaskState::Pending], TaskState::InProgress);
         db.save_task(&task).unwrap();
 
         let task_path = dir.path().join("g1").join("t1.toml");
@@ -1124,7 +1125,7 @@ mod tests {
         let (_dir, mut db) = db_with_goal_and_task;
         db.get_task_mut(&task_id("t1"))
             .unwrap()
-            .transition(TaskState::Pending, TaskState::InProgress);
+            .transition_from_any(&[TaskState::Pending], TaskState::InProgress);
         assert_eq!(
             db.get_task(&task_id("t1")).unwrap().state(),
             TaskState::InProgress

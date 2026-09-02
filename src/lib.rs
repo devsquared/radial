@@ -2,24 +2,30 @@
 #![allow(clippy::missing_panics_doc)]
 #![allow(clippy::must_use_candidate)]
 
-pub mod cli;
+pub(crate) mod cli;
 pub mod db;
 pub mod duration;
-pub mod helpers;
+pub(crate) mod helpers;
 pub mod id;
 pub mod models;
 pub mod ops;
-pub mod output;
+pub(crate) mod output;
+
+pub use db::{Database, DbLock};
+pub use id::{GoalId, TaskId};
+pub use models::{
+    Comment, Contract, Goal, GoalState, Metrics, Outcome, Priority, Task, TaskMetrics, TaskState,
+};
+pub use ops::task::CompleteResult;
 
 use anyhow::{Context, Result, anyhow};
+use clap::Parser;
 use cli::{Cli, Commands, CompactCommands, EditCommands, GoalCommands, TaskCommands};
-use db::{Database, DbLock};
-use id::TaskId;
 use output::RenderOptions;
 use std::path::{Path, PathBuf};
 
 pub const RADIAL_DIR: &str = ".radial";
-pub const REDIRECT_FILE: &str = "redirect";
+pub(crate) const REDIRECT_FILE: &str = "redirect";
 
 /// Finds the `.radial/` directory by walking up from `from`.
 /// Returns `None` if no `.radial/` directory is found.
@@ -247,8 +253,15 @@ fn run_task(task_cmd: TaskCommands, db: &mut Database) -> Result<()> {
     }
 }
 
+/// Parses CLI arguments and dispatches to the appropriate command.
+///
+/// Entry point for the `rd` binary; not part of the library's public API.
+pub fn run_cli() -> Result<()> {
+    run(Cli::parse())
+}
+
 #[allow(clippy::too_many_lines)]
-pub fn run(cli: Cli) -> Result<()> {
+fn run(cli: Cli) -> Result<()> {
     match cli.command {
         Commands::Init { stealth } => {
             let result = ops::init::run(stealth)?;

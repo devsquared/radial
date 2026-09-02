@@ -6,7 +6,7 @@ use crate::id::TaskId;
 use crate::models::Task;
 
 /// Find the most similar ID from a list of candidates
-pub fn find_similar_id<'a>(target: &str, candidates: &[&'a str]) -> Option<&'a str> {
+pub(crate) fn find_similar_id<'a>(target: &str, candidates: &[&'a str]) -> Option<&'a str> {
     candidates
         .iter()
         .map(|&candidate| (candidate, levenshtein(target, candidate)))
@@ -20,7 +20,7 @@ pub fn find_similar_id<'a>(target: &str, candidates: &[&'a str]) -> Option<&'a s
 /// Walks the dependency graph starting from each blocker in `new_blocked_by`,
 /// following existing `blocked_by` edges. If any path leads back to `task_id`,
 /// returns `Some(cycle_path)` with the IDs forming the cycle.
-pub fn detect_cycle(
+pub(crate) fn detect_cycle(
     task_id: &TaskId,
     new_blocked_by: &[TaskId],
     tasks: &[&Task],
@@ -96,8 +96,8 @@ mod tests {
     fn make_task(id: &str, blocked_by: Vec<&str>) -> Task {
         let now = Timestamp::now();
         Task::new(
-            TaskId::from(id.to_string()),
-            GoalId::from("g1".to_string()),
+            TaskId::new_unchecked(id.to_string()),
+            GoalId::new_unchecked("g1".to_string()),
             None,
             None,
             "test".to_string(),
@@ -106,7 +106,7 @@ mod tests {
             TaskState::Pending,
             blocked_by
                 .into_iter()
-                .map(|s| TaskId::from(s.to_string()))
+                .map(|s| TaskId::new_unchecked(s.to_string()))
                 .collect(),
             now,
             now,
@@ -122,8 +122,8 @@ mod tests {
         let tasks: Vec<&Task> = vec![&a, &b, &c];
 
         // Adding D blocked_by C — no cycle
-        let d_id = TaskId::from("DDDDDDDD".to_string());
-        let blocked_by = vec![TaskId::from("CCCCCCCC".to_string())];
+        let d_id = TaskId::new_unchecked("DDDDDDDD".to_string());
+        let blocked_by = vec![TaskId::new_unchecked("CCCCCCCC".to_string())];
         assert!(detect_cycle(&d_id, &blocked_by, &tasks).is_none());
     }
 
@@ -133,8 +133,8 @@ mod tests {
         let a = make_task("AAAAAAAA", vec![]);
         let tasks: Vec<&Task> = vec![&a];
 
-        let a_id = TaskId::from("AAAAAAAA".to_string());
-        let blocked_by = vec![TaskId::from("AAAAAAAA".to_string())];
+        let a_id = TaskId::new_unchecked("AAAAAAAA".to_string());
+        let blocked_by = vec![TaskId::new_unchecked("AAAAAAAA".to_string())];
         let cycle = detect_cycle(&a_id, &blocked_by, &tasks);
         assert!(cycle.is_some());
     }
@@ -146,8 +146,8 @@ mod tests {
         let b = make_task("BBBBBBBB", vec!["AAAAAAAA"]);
         let tasks: Vec<&Task> = vec![&a, &b];
 
-        let a_id = TaskId::from("AAAAAAAA".to_string());
-        let blocked_by = vec![TaskId::from("BBBBBBBB".to_string())];
+        let a_id = TaskId::new_unchecked("AAAAAAAA".to_string());
+        let blocked_by = vec![TaskId::new_unchecked("BBBBBBBB".to_string())];
         let cycle = detect_cycle(&a_id, &blocked_by, &tasks);
         assert!(cycle.is_some());
         let path = cycle.unwrap();
@@ -163,8 +163,8 @@ mod tests {
         let c = make_task("CCCCCCCC", vec!["BBBBBBBB"]);
         let tasks: Vec<&Task> = vec![&a, &b, &c];
 
-        let a_id = TaskId::from("AAAAAAAA".to_string());
-        let blocked_by = vec![TaskId::from("CCCCCCCC".to_string())];
+        let a_id = TaskId::new_unchecked("AAAAAAAA".to_string());
+        let blocked_by = vec![TaskId::new_unchecked("CCCCCCCC".to_string())];
         let cycle = detect_cycle(&a_id, &blocked_by, &tasks);
         assert!(cycle.is_some());
     }
