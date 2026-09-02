@@ -4,15 +4,23 @@ use serde::Serialize;
 use crate::db::Database;
 use crate::models::TaskState;
 
+/// A completed or failed task that hasn't been compacted yet.
 #[derive(Debug, Serialize)]
 pub struct CompactCandidate {
+    /// The task's ID.
     pub id: String,
+    /// The ID of the goal the task belongs to.
     pub goal_id: String,
+    /// The task's description.
     pub description: String,
+    /// The task's current state, as a display string.
     pub state: String,
+    /// When the task was completed, as a display string.
     pub completed_at: Option<String>,
 }
 
+/// List completed or failed, not-yet-compacted tasks eligible for
+/// compaction, optionally scoped to one goal.
 pub fn analyze(goal: Option<&str>, db: &Database) -> Result<Vec<CompactCandidate>> {
     let goals = match goal {
         Some(id) => {
@@ -47,6 +55,9 @@ pub fn analyze(goal: Option<&str>, db: &Database) -> Result<Vec<CompactCandidate
     Ok(candidates)
 }
 
+/// Compact a completed or failed task, replacing its heavy fields with the
+/// given summary. Fails if the task is already compacted or in a
+/// non-terminal state.
 pub fn apply(task_id: &str, summary: String, db: &mut Database) -> Result<String> {
     let tid = db.resolve_any_task(task_id).map_err(|e| anyhow!("{e}"))?;
     let task = db

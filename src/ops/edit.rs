@@ -5,6 +5,7 @@ use crate::helpers::{detect_cycle, find_similar_id};
 use crate::id::{GoalId, TaskId};
 use crate::models::{Contract, Goal, Priority, Task};
 
+/// Update a goal's description.
 pub fn goal(goal_id: &GoalId, description: String, db: &mut Database) -> Result<Goal> {
     let goal = db
         .get_goal_mut(goal_id)
@@ -16,6 +17,12 @@ pub fn goal(goal_id: &GoalId, description: String, db: &mut Database) -> Result<
     Ok(goal)
 }
 
+/// Update a task's description, priority, contract fields, and/or
+/// `blocked_by` list. Each parameter left `None` is unchanged; contract
+/// fields merge with the existing contract rather than replacing it wholesale.
+///
+/// Validates that new `blocked_by` IDs exist in the same goal, aren't the
+/// task itself, and don't introduce a dependency cycle.
 #[allow(clippy::too_many_arguments)]
 pub fn task(
     task_id: &TaskId,

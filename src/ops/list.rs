@@ -6,12 +6,17 @@ use crate::db::Database;
 use crate::id::TaskId;
 use crate::models::{Goal, Metrics, Task};
 
+/// A goal with its tasks in topological (dependency) order and its metrics.
 pub struct GoalWithTasks {
+    /// The goal.
     pub goal: Goal,
+    /// The goal's tasks, ordered so blockers come before what they block.
     pub tasks: Vec<Task>,
+    /// The goal's aggregate metrics.
     pub metrics: Metrics,
 }
 
+/// List every non-archived goal with its tasks in dependency order.
 pub fn run(db: &Database) -> Result<Vec<GoalWithTasks>> {
     let results = db
         .list_goals()
@@ -30,6 +35,8 @@ pub fn run(db: &Database) -> Result<Vec<GoalWithTasks>> {
     Ok(results)
 }
 
+/// List every archived goal. Archived goals don't load their tasks, so
+/// `tasks` is always empty and `metrics` is always the default.
 pub fn run_archived(db: &Database) -> Result<Vec<GoalWithTasks>> {
     let archived_goals = db.list_archived_goals()?;
     let results = archived_goals

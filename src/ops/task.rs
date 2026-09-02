@@ -13,15 +13,20 @@ use crate::models::{
 /// Result of completing a task, including any unblocked tasks.
 #[derive(Debug)]
 pub struct CompleteResult {
+    /// The completed task.
     pub task: Task,
+    /// IDs of tasks that became unblocked as a result.
     pub unblocked_task_ids: Vec<TaskId>,
 }
 
 /// Result of cancelling a task, including unblocked and cascaded tasks.
 #[derive(Debug)]
 pub struct CancelResult {
+    /// The cancelled task.
     pub task: Task,
+    /// IDs of tasks that became unblocked as a result.
     pub unblocked_task_ids: Vec<TaskId>,
+    /// IDs of downstream tasks also cancelled, if cascading was requested.
     pub cascaded_task_ids: Vec<TaskId>,
 }
 
@@ -43,6 +48,13 @@ fn task_not_found_err(task_id: &TaskId, db: &Database) -> anyhow::Error {
     }
 }
 
+/// Create a new task under a goal.
+///
+/// Validates the parent task (if any) and the `blocked_by` IDs (if any)
+/// against the goal's existing tasks, builds a contract from the given
+/// `receives`/`produces`/`verify` strings if any are set, and starts the
+/// task `Pending` or `Blocked` depending on whether its blockers are already
+/// complete.
 #[allow(clippy::too_many_arguments, clippy::too_many_lines)]
 pub fn create(
     goal_id: &GoalId,
@@ -181,6 +193,8 @@ pub fn create(
     Ok(task)
 }
 
+/// List a goal's tasks, optionally filtered by priority and/or assignee,
+/// sorted by priority.
 pub fn list(
     goal_id: &GoalId,
     priority: Option<&Priority>,
@@ -201,6 +215,11 @@ pub fn list(
     Ok(tasks)
 }
 
+/// Start a task: assign it and transition it to `InProgress`.
+///
+/// Fails if the task has subtasks, has no contract, or is not
+/// `Pending`/`Blocked` (unless `force` overrides an outstanding blocker).
+/// Also transitions the parent goal to `InProgress` on its first task start.
 pub fn start(task_id: &TaskId, assignee: &str, force: bool, db: &mut Database) -> Result<Task> {
     let task = db.get_task(task_id);
 
@@ -359,6 +378,11 @@ pub fn find_stale_tasks(threshold: SignedDuration, db: &Database) -> Vec<&Task> 
         .collect()
 }
 
+/// Complete an in-progress task, recording its outcome and metrics.
+///
+/// Compacts the task, unblocks any tasks that were waiting on it (or on its
+/// parent, if completing this task also completes the parent), and updates
+/// the goal's state if every task under it is now resolved.
 #[allow(clippy::too_many_lines)]
 pub fn complete(
     task_id: &TaskId,
@@ -500,6 +524,10 @@ pub fn complete(
     })
 }
 
+/// Mark an in-progress or verifying task as failed, optionally with a reason.
+///
+/// Auto-compacts the task when `compact` is set or the retry count has
+/// reached 3, so repeated failure history doesn't pollute future context.
 pub fn fail(
     task_id: &TaskId,
     reason: Option<String>,
@@ -562,6 +590,8 @@ pub fn fail(
     Ok(failed_task)
 }
 
+/// Retry a failed task, transitioning it back to `InProgress` and
+/// incrementing its retry count.
 pub fn retry(task_id: &TaskId, db: &mut Database) -> Result<Task> {
     let task = db.get_task(task_id);
 
@@ -598,6 +628,7 @@ pub fn retry(task_id: &TaskId, db: &mut Database) -> Result<Task> {
     Ok(retried_task)
 }
 
+/// Clear a task's assignee, returning it to `Pending`.
 pub fn release(task_id: &TaskId, db: &mut Database) -> Result<Task> {
     if db.get_task(task_id).is_none() {
         return Err(task_not_found_err(task_id, db));
@@ -696,6 +727,12 @@ fn cascade_cancel_downstream(
     Ok(cascaded_task_ids)
 }
 
+/// Cancel a task, removing it from downstream tasks' `blocked_by` lists and
+/// auto-unblocking any that become fully unblocked as a result.
+///
+/// If `cascade` is set, also cancels every downstream task reachable through
+/// `blocked_by` chains. Fails if the task has subtasks, or is already
+/// completed or cancelled.
 pub fn cancel(
     task_id: &TaskId,
     reason: Option<String>,
@@ -802,6 +839,10 @@ pub fn cancel(
     })
 }
 
+/// Delete a pending task, removing it from any downstream `blocked_by`
+/// lists so those tasks don't deadlock on a task that no longer exists.
+///
+/// Fails if the task has subtasks or is not `Pending`.
 pub fn delete(task_id: &TaskId, db: &mut Database) -> Result<Task> {
     let task = db
         .get_task(task_id)
@@ -858,12 +899,14 @@ pub fn delete(task_id: &TaskId, db: &mut Database) -> Result<Task> {
     Ok(task)
 }
 
+/// Look up a task and its full comment history.
 pub fn comments(task_id: &TaskId, db: &Database) -> Result<Task> {
     db.get_task(task_id)
         .ok_or_else(|| task_not_found_err(task_id, db))
         .cloned()
 }
 
+/// Add a comment to a task.
 pub fn comment(task_id: &TaskId, text: String, db: &mut Database) -> Result<Task> {
     if db.get_task(task_id).is_none() {
         return Err(task_not_found_err(task_id, db));

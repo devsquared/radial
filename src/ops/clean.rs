@@ -6,9 +6,13 @@ use crate::models::{Goal, GoalState};
 /// Result of a `clean` run: what was found and what got removed.
 #[derive(Debug)]
 pub struct CleanResult {
+    /// Number of goals eligible for cleaning.
     pub candidates: usize,
+    /// The goals that were actually archived or deleted.
     pub removed: Vec<Goal>,
+    /// Whether removal deleted goals outright rather than archiving them.
     pub purge: bool,
+    /// Whether every completed/cancelled goal was force-removed without confirmation.
     pub force: bool,
 }
 

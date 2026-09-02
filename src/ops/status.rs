@@ -6,6 +6,7 @@ use crate::id::GoalId;
 use crate::id::TaskId;
 use crate::models::{Goal, Metrics, Task};
 
+/// A single goal with its tasks and aggregate metrics.
 #[derive(Debug, Serialize)]
 pub struct GoalStatus {
     #[serde(flatten)]
@@ -15,19 +16,23 @@ pub struct GoalStatus {
 }
 
 impl GoalStatus {
+    /// The goal.
     pub fn goal(&self) -> &Goal {
         &self.goal
     }
 
+    /// The goal's tasks.
     pub fn tasks(&self) -> &[Task] {
         &self.tasks
     }
 
+    /// The goal's aggregate metrics.
     pub fn metrics(&self) -> &Metrics {
         &self.metrics
     }
 }
 
+/// A goal with freshly computed metrics, for a listing of all goals.
 #[derive(Debug, Serialize)]
 pub struct GoalSummary {
     #[serde(flatten)]
@@ -36,10 +41,12 @@ pub struct GoalSummary {
 }
 
 impl GoalSummary {
+    /// The goal.
     pub fn goal(&self) -> &Goal {
         &self.goal
     }
 
+    /// The goal's freshly computed metrics.
     pub fn computed_metrics(&self) -> &Metrics {
         &self.computed_metrics
     }
@@ -48,11 +55,15 @@ impl GoalSummary {
 /// Result of a status query - can be a single task, single goal, or all goals.
 #[derive(Debug)]
 pub enum StatusResult {
+    /// Status of a single task.
     Task(Task),
+    /// Status of a single goal and its tasks.
     Goal(GoalStatus),
+    /// Summary of every goal in the database.
     AllGoals(Vec<GoalSummary>),
 }
 
+/// Look up status for a task, a goal, or (if neither ID is given) every goal.
 pub fn run(
     goal_id: Option<GoalId>,
     task_id: Option<TaskId>,

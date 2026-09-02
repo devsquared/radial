@@ -5,6 +5,7 @@ use strum::{AsRefStr, EnumString};
 use super::{Comment, Contract, Outcome};
 use crate::id::{GoalId, TaskId};
 
+/// A task's priority, from most (`P0`) to least (`P3`) urgent.
 #[derive(
     Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord, AsRefStr, EnumString,
 )]
@@ -13,27 +14,40 @@ use crate::id::{GoalId, TaskId};
 #[derive(Default)]
 #[non_exhaustive]
 pub enum Priority {
+    /// Critical.
     P0,
+    /// High.
     P1,
+    /// Normal; the default.
     #[default]
     P2,
+    /// Low.
     P3,
 }
 
+/// The lifecycle state of a [`Task`].
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, AsRefStr, EnumString)]
 #[serde(rename_all = "lowercase")]
 #[strum(serialize_all = "snake_case")]
 #[non_exhaustive]
 pub enum TaskState {
+    /// Not yet started, and not blocked.
     Pending,
+    /// Waiting on one or more other tasks in `blocked_by`.
     Blocked,
+    /// Started and being worked on.
     InProgress,
+    /// Work is done and awaiting verification against its contract.
     Verifying,
+    /// Finished successfully.
     Completed,
+    /// Finished unsuccessfully.
     Failed,
+    /// Cancelled before completion.
     Cancelled,
 }
 
+/// Token, time, and retry counters for a single [`Task`].
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct TaskMetrics {
     tokens: i64,
@@ -42,6 +56,7 @@ pub struct TaskMetrics {
 }
 
 impl TaskMetrics {
+    /// Creates a new set of metrics from its raw counters.
     pub fn new(tokens: i64, elapsed_ms: i64, retry_count: i64) -> Self {
         Self {
             tokens,
@@ -50,19 +65,24 @@ impl TaskMetrics {
         }
     }
 
+    /// Tokens spent on the task.
     pub fn tokens(&self) -> i64 {
         self.tokens
     }
 
+    /// Elapsed time spent on the task, in milliseconds.
     pub fn elapsed_ms(&self) -> i64 {
         self.elapsed_ms
     }
 
+    /// Number of times the task has been retried.
     pub fn retry_count(&self) -> i64 {
         self.retry_count
     }
 }
 
+/// A tracked, verifiable unit of work under a [`Goal`](crate::models::Goal),
+/// carrying a [`Contract`] and optionally an [`Outcome`] once completed.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Task {
     id: TaskId,
@@ -150,14 +170,18 @@ impl Task {
         self
     }
 
+    /// The task's unique ID.
     pub fn id(&self) -> &TaskId {
         &self.id
     }
 
+    /// The ID of the goal this task belongs to.
     pub fn goal_id(&self) -> &GoalId {
         &self.goal_id
     }
 
+    /// The task's sequence number, used to build its [`display_ref`](Self::display_ref).
+    /// `None` for tasks created before sequence numbers existed.
     pub fn seq(&self) -> Option<u32> {
         self.seq
     }
@@ -177,58 +201,72 @@ impl Task {
         self.display_ref_field = self.seq.map(|s| format!("g{goal_seq}.{s}"));
     }
 
+    /// The ID of the task this one is a subtask of, if any.
     pub fn parent_id(&self) -> Option<&TaskId> {
         self.parent_id.as_ref()
     }
 
+    /// The task's description.
     pub fn description(&self) -> &str {
         &self.description
     }
 
+    /// The task's priority.
     pub fn priority(&self) -> Priority {
         self.priority
     }
 
+    /// The task's receives/produces/verify contract, if one was set.
     pub fn contract(&self) -> Option<&Contract> {
         self.contract.as_ref()
     }
 
+    /// The task's current lifecycle state.
     pub fn state(&self) -> TaskState {
         self.state
     }
 
+    /// IDs of the tasks that must complete before this one can start.
     pub fn blocked_by(&self) -> &[TaskId] {
         &self.blocked_by
     }
 
+    /// The task's recorded completion outcome, if it has one.
     pub fn result(&self) -> Option<&Outcome> {
         self.result.as_ref()
     }
 
+    /// When the task was created.
     pub fn created_at(&self) -> Timestamp {
         self.created_at
     }
 
+    /// When the task was last updated.
     pub fn updated_at(&self) -> Timestamp {
         self.updated_at
     }
 
+    /// When the task was completed, if it has been.
     pub fn completed_at(&self) -> Option<Timestamp> {
         self.completed_at
     }
 
+    /// The task's token/time/retry metrics.
     pub fn metrics(&self) -> &TaskMetrics {
         &self.metrics
     }
 
+    /// Comments left on the task, in the order they were added.
     pub fn comments(&self) -> &[Comment] {
         &self.comments
     }
 
+    /// Whether the task has been compacted (its heavy fields replaced with a summary).
     pub fn compacted(&self) -> bool {
         self.compacted
     }
 
+    /// The task's compaction summary, if it has been compacted.
     pub fn summary(&self) -> Option<&str> {
         self.summary.as_deref()
     }
@@ -281,10 +319,12 @@ impl Task {
         self.updated_at = Timestamp::now();
     }
 
+    /// Who the task is currently assigned to, if anyone.
     pub fn assignee(&self) -> Option<&str> {
         self.assignee.as_deref()
     }
 
+    /// When the task was started, if it has been.
     pub fn started_at(&self) -> Option<Timestamp> {
         self.started_at
     }

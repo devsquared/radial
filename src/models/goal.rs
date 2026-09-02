@@ -4,18 +4,25 @@ use strum::{AsRefStr, EnumString};
 
 use crate::id::GoalId;
 
+/// The lifecycle state of a [`Goal`], derived from the state of its tasks.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, AsRefStr, EnumString)]
 #[serde(rename_all = "lowercase")]
 #[strum(serialize_all = "snake_case")]
 #[non_exhaustive]
 pub enum GoalState {
+    /// No task under the goal has started.
     Pending,
+    /// At least one task under the goal has started.
     InProgress,
+    /// Every task under the goal completed successfully.
     Completed,
+    /// The goal was marked failed.
     Failed,
+    /// The goal was cancelled.
     Cancelled,
 }
 
+/// Aggregate token, time, and task-count counters for a [`Goal`].
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(default)]
 pub struct Metrics {
@@ -30,6 +37,7 @@ pub struct Metrics {
 }
 
 impl Metrics {
+    /// Creates a new set of metrics from its raw counters.
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         total_tokens: i64,
@@ -53,39 +61,49 @@ impl Metrics {
         }
     }
 
+    /// Total tokens spent across the goal's tasks.
     pub fn total_tokens(&self) -> i64 {
         self.total_tokens
     }
 
+    /// Prompt tokens spent across the goal's tasks.
     pub fn prompt_tokens(&self) -> i64 {
         self.prompt_tokens
     }
 
+    /// Completion tokens spent across the goal's tasks.
     pub fn completion_tokens(&self) -> i64 {
         self.completion_tokens
     }
 
+    /// Total elapsed time, in milliseconds, across the goal's tasks.
     pub fn elapsed_ms(&self) -> i64 {
         self.elapsed_ms
     }
 
+    /// Number of tasks under the goal.
     pub fn task_count(&self) -> i64 {
         self.task_count
     }
 
+    /// Number of tasks under the goal that completed successfully.
     pub fn tasks_completed(&self) -> i64 {
         self.tasks_completed
     }
 
+    /// Number of tasks under the goal that failed.
     pub fn tasks_failed(&self) -> i64 {
         self.tasks_failed
     }
 
+    /// Number of tasks under the goal that were cancelled.
     pub fn tasks_cancelled(&self) -> i64 {
         self.tasks_cancelled
     }
 }
 
+/// A high-level objective, broken into tracked [`Task`](crate::models::Task)s
+/// connected by contracts.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Goal {
     id: GoalId,
@@ -132,10 +150,13 @@ impl Goal {
         }
     }
 
+    /// The goal's unique ID.
     pub fn id(&self) -> &GoalId {
         &self.id
     }
 
+    /// The goal's sequence number, used to build its [`display_ref`](Self::display_ref).
+    /// `None` for goals created before sequence numbers existed.
     pub fn seq(&self) -> Option<u32> {
         self.seq
     }
@@ -146,26 +167,32 @@ impl Goal {
         self.display_ref_field.clone()
     }
 
+    /// The goal's description.
     pub fn description(&self) -> &str {
         &self.description
     }
 
+    /// The goal's current lifecycle state.
     pub fn state(&self) -> GoalState {
         self.state
     }
 
+    /// When the goal was created.
     pub fn created_at(&self) -> Timestamp {
         self.created_at
     }
 
+    /// When the goal was last updated.
     pub fn updated_at(&self) -> Timestamp {
         self.updated_at
     }
 
+    /// When the goal was completed, if it has been.
     pub fn completed_at(&self) -> Option<Timestamp> {
         self.completed_at
     }
 
+    /// The goal's aggregate metrics.
     pub fn metrics(&self) -> &Metrics {
         &self.metrics
     }

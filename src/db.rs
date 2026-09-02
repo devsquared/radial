@@ -18,11 +18,18 @@ use crate::models::{Goal, Metrics, Task, TaskState};
 pub enum ResolveError {
     /// No ID matches the input prefix.
     NotFound {
+        /// The prefix that was typed.
         input: String,
+        /// A similarly-spelled existing ID, if one was found.
         suggestion: Option<String>,
     },
     /// Multiple IDs match the input prefix.
-    Ambiguous { input: String, matches: Vec<String> },
+    Ambiguous {
+        /// The prefix that was typed.
+        input: String,
+        /// Every existing ID the prefix matches.
+        matches: Vec<String>,
+    },
 }
 
 impl std::fmt::Display for ResolveError {
@@ -119,6 +126,8 @@ pub(crate) fn atomic_write(path: &Path, content: &[u8]) -> Result<()> {
     Ok(())
 }
 
+/// In-memory view of a `.radial/` directory, loaded up front and written back
+/// through [`Database::save_task`]/[`Database::save_goal`] as it changes.
 pub struct Database {
     path: PathBuf,
     goals: HashMap<GoalId, Goal>,
@@ -300,6 +309,8 @@ impl Database {
 
     // Goal operations
 
+    /// Create a new goal directory, persist the goal, and add it to memory.
+    /// Fails if a goal with the same ID already exists.
     pub fn create_goal(&mut self, goal: Goal) -> Result<()> {
         if self.goals.contains_key(goal.id()) {
             bail!("Goal already exists: {}", goal.id());
@@ -314,20 +325,24 @@ impl Database {
         Ok(())
     }
 
+    /// Look up a goal by exact ID.
     pub fn get_goal(&self, id: &GoalId) -> Option<&Goal> {
         self.goals.get(id)
     }
 
+    /// Look up a goal by exact ID, returning a mutable reference.
     pub fn get_goal_mut(&mut self, id: &GoalId) -> Option<&mut Goal> {
         self.goals.get_mut(id)
     }
 
+    /// List all non-archived goals, most recently created first.
     pub fn list_goals(&self) -> Vec<&Goal> {
         let mut goals: Vec<&Goal> = self.goals.values().collect();
         goals.sort_by_key(|g| std::cmp::Reverse(g.created_at()));
         goals
     }
 
+    /// List all archived goals, most recently created first.
     pub fn list_archived_goals(&self) -> Result<Vec<Goal>> {
         let archive_dir = self.path.join("archive");
         if !archive_dir.exists() {
@@ -392,6 +407,7 @@ impl Database {
         Ok(())
     }
 
+    /// Move a goal's directory (and remove it from memory) into `archive/`.
     pub fn archive_goal(&mut self, goal_id: &GoalId) -> Result<()> {
         // Remove tasks from memory
         self.tasks.retain(|_, t| t.goal_id() != goal_id);
@@ -419,6 +435,9 @@ impl Database {
         Ok(())
     }
 
+    /// Move an archived goal's directory back out of `archive/`.
+    /// Fails if the goal is not archived, or if a directory already exists at
+    /// the restore destination.
     pub fn restore_goal(&mut self, goal_id: &GoalId) -> Result<()> {
         // Move the goal directory from archive/ back to .radial/
         let archive_dir = self.path.join("archive");
@@ -448,6 +467,7 @@ impl Database {
         Ok(())
     }
 
+    /// Discard in-memory state and reload every goal and task from disk.
     pub fn reload(&mut self) -> Result<()> {
         // Clear existing state
         self.goals.clear();
@@ -459,6 +479,8 @@ impl Database {
 
     // Task operations
 
+    /// Persist a new task and add it to memory.
+    /// Fails if a task with the same ID already exists.
     pub fn create_task(&mut self, task: Task) -> Result<()> {
         if self.tasks.contains_key(task.id()) {
             bail!("Task already exists: {}", task.id());
@@ -470,6 +492,7 @@ impl Database {
         Ok(())
     }
 
+    /// Look up a task by exact ID.
     pub fn get_task(&self, id: &TaskId) -> Option<&Task> {
         self.tasks.get(id)
     }
@@ -492,10 +515,12 @@ impl Database {
         Ok(())
     }
 
+    /// Look up a task by exact ID, returning a mutable reference.
     pub fn get_task_mut(&mut self, id: &TaskId) -> Option<&mut Task> {
         self.tasks.get_mut(id)
     }
 
+    /// List a task's direct subtasks, oldest first.
     pub fn list_subtasks(&self, parent_id: &TaskId) -> Vec<&Task> {
         let mut subtasks: Vec<&Task> = self
             .tasks
@@ -506,6 +531,7 @@ impl Database {
         subtasks
     }
 
+    /// Returns `true` if any task has `task_id` as its parent.
     pub fn has_subtasks(&self, task_id: &TaskId) -> bool {
         self.tasks.values().any(|t| t.parent_id() == Some(task_id))
     }
@@ -541,6 +567,7 @@ impl Database {
         Ok(Some(derived))
     }
 
+    /// List all tasks belonging to a goal, oldest first.
     pub fn list_tasks(&self, goal_id: &GoalId) -> Vec<&Task> {
         let mut tasks: Vec<&Task> = self
             .tasks
@@ -562,6 +589,8 @@ impl Database {
             .map_or(1, |max| max + 1)
     }
 
+    /// Aggregate a goal's [`Metrics`] (task counts, tokens, elapsed time) from
+    /// its current tasks.
     #[allow(clippy::missing_panics_doc)]
     pub fn compute_goal_metrics(&self, goal_id: &GoalId) -> Metrics {
         let tasks = self.list_tasks(goal_id);
