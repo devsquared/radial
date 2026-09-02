@@ -42,6 +42,9 @@ rd task create <goal_id> "Parse config" \
 # List tasks for a goal
 rd task list <goal_id>
 
+# goal_id can be omitted if you have exactly one active (pending/in-progress) goal
+rd task list
+
 # Filter tasks by priority
 rd task list <goal_id> --priority p0
 rd task list <goal_id> --verbose    # Include comments (truncated to terminal width)
@@ -82,6 +85,7 @@ rd task start <task_id> --assignee "agent-1" --force # Start even if blocked (ov
 rd task complete <task_id> --result "Added login endpoint with JWT"
 rd task complete <task_id> --result "Done" --artifacts "src/auth.rs,src/jwt.rs"
 rd task complete <task_id> --result "Done" --tokens 1500 --elapsed 30000
+# --elapsed is optional: if omitted, it's derived from how long the task was in progress
 rd task fail <task_id>                           # Mark as failed
 rd task fail <task_id> --reason "Why it failed" # Mark failed with reason
 rd task fail <task_id> --reason "..." --compact  # Compact immediately (requires --reason)
@@ -140,6 +144,7 @@ rd status --json             # Output as JSON
 rd show <id>                 # Full details of a goal or task (auto-detects)
 rd show <id> --json          # Output as JSON
 rd ready <goal_id>                # Show ready tasks, sorted by priority (p0 first)
+rd ready                          # goal_id can be omitted with exactly one active goal
 rd ready <goal_id> --priority p0  # Ready tasks filtered by priority
 rd ready <goal_id> --json    # Output as JSON (no advisories in JSON mode)
 ```

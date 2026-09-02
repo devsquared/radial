@@ -36,10 +36,13 @@ pub use models::{
 pub use ops::task::CompleteResult;
 
 use anyhow::{Context, Result, anyhow};
-use clap::Parser;
+use clap::{CommandFactory, Parser};
 use cli::{Cli, Commands, CompactCommands, EditCommands, GoalCommands, TaskCommands};
 use output::RenderOptions;
 use std::path::{Path, PathBuf};
+
+/// The name completion scripts and usage text refer to the binary as.
+const BIN_NAME: &str = "rd";
 
 /// Name of the directory radial stores its state in, relative to a project root.
 pub const RADIAL_DIR: &str = ".radial";
@@ -116,6 +119,34 @@ fn ensure_initialized_for_read() -> Result<(Database, DbLock)> {
     Database::open_for_read(&radial_dir).context("Failed to open database for read")
 }
 
+/// Resolve a goal ID argument that may have been omitted, falling back to
+/// the single active (pending or in-progress) goal when there is exactly one.
+fn resolve_goal_or_default(goal_id: Option<&str>, db: &Database) -> Result<GoalId> {
+    if let Some(id) = goal_id {
+        return db.resolve_any_goal(id).map_err(|e| anyhow!("{e}"));
+    }
+
+    let active: Vec<&Goal> = db
+        .list_goals()
+        .into_iter()
+        .filter(|g| matches!(g.state(), GoalState::Pending | GoalState::InProgress))
+        .collect();
+
+    match active.as_slice() {
+        [only] => Ok(only.id().clone()),
+        [] => Err(anyhow!(
+            "No active goals found. Specify a goal ID, or create one with 'radial goal create'."
+        )),
+        multiple => {
+            let ids: Vec<&str> = multiple.iter().map(|g| g.id().as_ref()).collect();
+            Err(anyhow!(
+                "Multiple active goals found ({}). Specify which one with a goal ID.",
+                ids.join(", ")
+            ))
+        }
+    }
+}
+
 fn run_goal(goal_cmd: GoalCommands, db: &mut Database) -> Result<()> {
     match goal_cmd {
         GoalCommands::Create { description, json } => {
@@ -126,10 +157,14 @@ fn run_goal(goal_cmd: GoalCommands, db: &mut Database) -> Result<()> {
             let goals = ops::goal::list(db);
             output::goal_list(&goals, &RenderOptions::new().json(json))
         }
-        GoalCommands::Cancel { goal_id, reason } => {
+        GoalCommands::Cancel {
+            goal_id,
+            reason,
+            json,
+        } => {
             let goal_id = db.resolve_goal_id(&goal_id).map_err(|e| anyhow!("{e}"))?;
-            let (goal, cancelled_task_ids) = ops::goal::cancel(&goal_id, reason, "cli", db)?;
-            output::goal_cancelled(&goal, &cancelled_task_ids)
+            let result = ops::goal::cancel(&goal_id, reason, "cli", db)?;
+            output::goal_cancelled(&result, &RenderOptions::new().json(json))
         }
     }
 }
@@ -174,7 +209,7 @@ fn run_task(task_cmd: TaskCommands, db: &mut Database) -> Result<()> {
             assignee,
             full,
         } => {
-            let goal_id = db.resolve_any_goal(&goal_id).map_err(|e| anyhow!("{e}"))?;
+            let goal_id = resolve_goal_or_default(goal_id.as_deref(), db)?;
             let tasks = ops::task::list(&goal_id, priority.as_ref(), assignee.as_deref(), db)?;
             let goal = db
                 .get_goal(&goal_id)
@@ -189,10 +224,11 @@ fn run_task(task_cmd: TaskCommands, db: &mut Database) -> Result<()> {
             task_id,
             assignee,
             force,
+            json,
         } => {
             let task_id = db.resolve_any_task(&task_id).map_err(|e| anyhow!("{e}"))?;
             let task = ops::task::start(&task_id, &assignee, force, db)?;
-            output::task_started(&task)
+            output::task_started(&task, &RenderOptions::new().json(json))
         }
         TaskCommands::Complete {
             task_id,
@@ -200,73 +236,82 @@ fn run_task(task_cmd: TaskCommands, db: &mut Database) -> Result<()> {
             artifacts,
             tokens,
             elapsed,
+            json,
         } => {
             let task_id = db.resolve_any_task(&task_id).map_err(|e| anyhow!("{e}"))?;
             let complete_result =
                 ops::task::complete(&task_id, result, artifacts, tokens, elapsed, db)?;
-            output::task_completed(&complete_result)
+            output::task_completed(&complete_result, &RenderOptions::new().json(json))
         }
         TaskCommands::Fail {
             task_id,
             reason,
             compact,
+            json,
         } => {
             let task_id = db.resolve_any_task(&task_id).map_err(|e| anyhow!("{e}"))?;
             let task = ops::task::fail(&task_id, reason, compact, db)?;
-            output::task_failed(&task)
+            output::task_failed(&task, &RenderOptions::new().json(json))
         }
         TaskCommands::Cancel {
             task_id,
             reason,
             cascade,
+            json,
         } => {
             let task_id = db.resolve_any_task(&task_id).map_err(|e| anyhow!("{e}"))?;
             let result = ops::task::cancel(&task_id, reason, "cli", cascade, db)?;
-            output::task_cancelled(&result)
+            output::task_cancelled(&result, &RenderOptions::new().json(json))
         }
-        TaskCommands::Retry { task_id } => {
+        TaskCommands::Retry { task_id, json } => {
             let task_id = db.resolve_any_task(&task_id).map_err(|e| anyhow!("{e}"))?;
             let task = ops::task::retry(&task_id, db)?;
-            output::task_retry(&task)
+            output::task_retry(&task, &RenderOptions::new().json(json))
         }
         TaskCommands::Release {
             task_id,
             stale,
             all_in_progress,
+            json,
         } => {
+            let opts = RenderOptions::new().json(json);
             if let Some(ref task_id_str) = task_id {
                 let task_id = db
                     .resolve_any_task(task_id_str)
                     .map_err(|e| anyhow!("{e}"))?;
                 let task = ops::task::release(&task_id, db)?;
-                output::task_released(&task)
+                output::task_released(&task, &opts)
             } else if let Some(duration_str) = stale {
                 let threshold = crate::duration::parse_duration(&duration_str)?;
                 let tasks = ops::task::release_stale(threshold, db)?;
-                output::tasks_released_stale(&tasks)
+                output::tasks_released_stale(&tasks, &opts)
             } else if all_in_progress {
                 let tasks = ops::task::release_all_in_progress(db)?;
-                output::tasks_released_all_in_progress(&tasks)
+                output::tasks_released_all_in_progress(&tasks, &opts)
             } else {
                 Err(anyhow!(
                     "Provide a task ID, --stale <duration>, or --all-in-progress"
                 ))
             }
         }
-        TaskCommands::Delete { task_id } => {
+        TaskCommands::Delete { task_id, json } => {
             let task_id = db.resolve_any_task(&task_id).map_err(|e| anyhow!("{e}"))?;
             let task = ops::task::delete(&task_id, db)?;
-            output::task_deleted(&task)
+            output::task_deleted(&task, &RenderOptions::new().json(json))
         }
-        TaskCommands::Comment { task_id, text } => {
+        TaskCommands::Comment {
+            task_id,
+            text,
+            json,
+        } => {
             let task_id = db.resolve_any_task(&task_id).map_err(|e| anyhow!("{e}"))?;
             let task = ops::task::comment(&task_id, text, db)?;
-            output::task_commented(&task, &RenderOptions::new())
+            output::task_commented(&task, &RenderOptions::new().json(json))
         }
-        TaskCommands::Comments { task_id } => {
+        TaskCommands::Comments { task_id, json } => {
             let task_id = db.resolve_any_task(&task_id).map_err(|e| anyhow!("{e}"))?;
             let task = ops::task::comments(&task_id, db)?;
-            output::task_comments(&task, &RenderOptions::new())
+            output::task_comments(&task, &RenderOptions::new().json(json))
         }
     }
 }
@@ -281,9 +326,9 @@ pub fn run_cli() -> Result<()> {
 #[allow(clippy::too_many_lines)]
 fn run(cli: Cli) -> Result<()> {
     match cli.command {
-        Commands::Init { stealth } => {
+        Commands::Init { stealth, json } => {
             let result = ops::init::run(stealth)?;
-            output::init(&result)
+            output::init(&result, &RenderOptions::new().json(json))
         }
         Commands::Goal(goal_cmd) => {
             let (mut db, _guard) = ensure_initialized_for_write()?;
@@ -312,10 +357,11 @@ fn run(cli: Cli) -> Result<()> {
                 EditCommands::Goal {
                     goal_id,
                     description,
+                    json,
                 } => {
                     let goal_id = db.resolve_any_goal(&goal_id).map_err(|e| anyhow!("{e}"))?;
                     let goal = ops::edit::goal(&goal_id, description, &mut db)?;
-                    output::goal_edited(&goal)
+                    output::goal_edited(&goal, &RenderOptions::new().json(json))
                 }
                 EditCommands::Task {
                     task_id,
@@ -325,6 +371,7 @@ fn run(cli: Cli) -> Result<()> {
                     produces,
                     verify,
                     blocked_by,
+                    json,
                 } => {
                     let task_id = db.resolve_any_task(&task_id).map_err(|e| anyhow!("{e}"))?;
                     let task = ops::edit::task(
@@ -337,7 +384,7 @@ fn run(cli: Cli) -> Result<()> {
                         parse_blocked_by(blocked_by, &db)?,
                         &mut db,
                     )?;
-                    output::task_edited(&task)
+                    output::task_edited(&task, &RenderOptions::new().json(json))
                 }
             }
         }
@@ -362,22 +409,33 @@ fn run(cli: Cli) -> Result<()> {
             let result = ops::show::run(&id, &db)?;
             output::show(&result, &RenderOptions::new().json(json))
         }
-        Commands::Clean { all, force, purge } => {
+        Commands::Clean {
+            all,
+            force,
+            purge,
+            json,
+        } => {
             let (mut db, _guard) = ensure_initialized_for_write()?;
-            let result = ops::clean::run(
-                all,
-                force,
-                purge,
-                &mut db,
-                output::confirm_clean,
-                output::clean_removed,
-            )?;
-            output::clean(&result)
+            // JSON output can't interleave with an interactive prompt, so treat
+            // --json as implicitly non-interactive rather than erroring.
+            let result = if json {
+                ops::clean::run(all, force, purge, &mut db, |_, _| Ok(true), |_, _| Ok(()))?
+            } else {
+                ops::clean::run(
+                    all,
+                    force,
+                    purge,
+                    &mut db,
+                    output::confirm_clean,
+                    output::clean_removed,
+                )?
+            };
+            output::clean(&result, &RenderOptions::new().json(json))
         }
-        Commands::Restore { goal_id } => {
+        Commands::Restore { goal_id, json } => {
             let (mut db, _guard) = ensure_initialized_for_write()?;
             let goal = ops::restore::run(&goal_id, &mut db)?;
-            output::goal_restored(&goal)
+            output::goal_restored(&goal, &RenderOptions::new().json(json))
         }
         Commands::Ready {
             goal_id,
@@ -385,7 +443,7 @@ fn run(cli: Cli) -> Result<()> {
             json,
         } => {
             let (db, _guard) = ensure_initialized_for_read()?;
-            let goal_id = db.resolve_any_goal(&goal_id).map_err(|e| anyhow!("{e}"))?;
+            let goal_id = resolve_goal_or_default(goal_id.as_deref(), &db)?;
             let ready = ops::ready::run(&goal_id, priority.as_ref(), &db)?;
             let goal = db
                 .get_goal(&goal_id)
@@ -394,10 +452,10 @@ fn run(cli: Cli) -> Result<()> {
                 ops::task::find_stale_tasks(jiff::SignedDuration::from_secs(2 * 3600), &db).len();
             output::ready_tasks(&ready, goal, stale_count, &RenderOptions::new().json(json))
         }
-        Commands::Prep => {
+        Commands::Prep { json } => {
             let (db, _guard) = ensure_initialized_for_read()?;
             let text = ops::prep::run(&db);
-            output::prep(&text)
+            output::prep(&text, &RenderOptions::new().json(json))
         }
         Commands::Compact(compact_cmd) => {
             let (mut db, _guard) = ensure_initialized_for_write()?;
@@ -406,11 +464,19 @@ fn run(cli: Cli) -> Result<()> {
                     let candidates = ops::compact::analyze(goal.as_deref(), &db)?;
                     output::compact_analyze(&candidates, &RenderOptions::new().json(json))
                 }
-                CompactCommands::Apply { task_id, summary } => {
+                CompactCommands::Apply {
+                    task_id,
+                    summary,
+                    json,
+                } => {
                     let id = ops::compact::apply(&task_id, summary, &mut db)?;
-                    output::compact_apply(&id)
+                    output::compact_apply(&id, &RenderOptions::new().json(json))
                 }
             }
+        }
+        Commands::Completions { shell } => {
+            clap_complete::generate(shell, &mut Cli::command(), BIN_NAME, &mut std::io::stdout());
+            Ok(())
         }
     }
 }

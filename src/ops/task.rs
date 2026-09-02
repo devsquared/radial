@@ -2,6 +2,7 @@ use std::collections::{HashSet, VecDeque};
 
 use anyhow::{Result, anyhow};
 use jiff::{SignedDuration, Timestamp};
+use serde::Serialize;
 
 use crate::db::Database;
 use crate::helpers::find_similar_id;
@@ -11,7 +12,7 @@ use crate::models::{
 };
 
 /// Result of completing a task, including any unblocked tasks.
-#[derive(Debug)]
+#[derive(Debug, Serialize)]
 pub struct CompleteResult {
     /// The completed task.
     pub task: Task,
@@ -20,7 +21,7 @@ pub struct CompleteResult {
 }
 
 /// Result of cancelling a task, including unblocked and cascaded tasks.
-#[derive(Debug)]
+#[derive(Debug, Serialize)]
 pub struct CancelResult {
     /// The cancelled task.
     pub task: Task,
@@ -237,7 +238,7 @@ pub fn start(task_id: &TaskId, assignee: &str, force: bool, db: &mut Database) -
 
     if task.contract().is_none() {
         return Err(anyhow!(
-            "Task has no contract. Set a contract before starting.\nUse: radial task contract {} --receives \"...\" --produces \"...\" --verify \"...\"",
+            "Task has no contract. Set a contract before starting.\nUse: radial edit task {} --receives \"...\" --produces \"...\" --verify \"...\"",
             task.id()
         ));
     }
@@ -380,6 +381,10 @@ pub fn find_stale_tasks(threshold: SignedDuration, db: &Database) -> Vec<&Task> 
 
 /// Complete an in-progress task, recording its outcome and metrics.
 ///
+/// If `elapsed` is `None`, it is derived from the time between the task's
+/// `started_at` (or `updated_at`, for tasks started before that field
+/// existed) and now.
+///
 /// Compacts the task, unblocks any tasks that were waiting on it (or on its
 /// parent, if completing this task also completes the parent), and updates
 /// the goal's state if every task under it is now resolved.
@@ -415,11 +420,21 @@ pub fn complete(
 
     let goal_id = task.goal_id().clone();
     let retry_count = task.metrics().retry_count();
+    let started_at = task.started_at().unwrap_or_else(|| task.updated_at());
     let artifacts_list = artifacts.unwrap_or_default();
 
     let compact_summary = result_summary.clone();
     let outcome = Outcome::new(result_summary, artifacts_list);
-    let metrics = TaskMetrics::new(tokens.unwrap_or(0), elapsed.unwrap_or(0), retry_count);
+    // Derive elapsed time from started_at when the caller doesn't supply one,
+    // so agents aren't required to track wall-clock time themselves.
+    let elapsed_ms = elapsed.unwrap_or_else(|| {
+        Timestamp::now()
+            .duration_since(started_at)
+            .as_millis()
+            .try_into()
+            .unwrap_or(i64::MAX)
+    });
+    let metrics = TaskMetrics::new(tokens.unwrap_or(0), elapsed_ms, retry_count);
 
     let task = db.get_task_mut(task_id).unwrap();
     if !task.complete(outcome, metrics) {

@@ -9,6 +9,7 @@ use crate::id::TaskId;
 use crate::models::{Goal, Task};
 use crate::ops::clean::CleanResult;
 use crate::ops::compact::CompactCandidate;
+use crate::ops::goal::GoalCancelResult;
 use crate::ops::init::InitResult;
 use crate::ops::list::GoalWithTasks;
 use crate::ops::show::ShowResult;
@@ -142,51 +143,54 @@ pub fn goal_list(goals: &[Goal], opts: &RenderOptions) -> Result<()> {
 
 // -- Edit outputs --
 
-pub fn goal_edited(goal: &Goal) -> Result<()> {
-    let mut w = io::stdout().lock();
-    writeln!(
-        w,
-        "{} {}",
-        style("Updated goal:").green(),
-        style(goal.id()).cyan().bold()
-    )?;
-    writeln!(w, "  {}", truncate(goal.description(), 80))?;
-    Ok(())
-}
-
-pub fn goal_cancelled(goal: &Goal, cancelled_task_ids: &[TaskId]) -> Result<()> {
-    let mut w = io::stdout().lock();
-    writeln!(
-        w,
-        "{} {}",
-        style("Cancelled goal:").dim(),
-        style(goal.id()).cyan().bold()
-    )?;
-    writeln!(w, "  {}", truncate(goal.description(), 80))?;
-
-    if !cancelled_task_ids.is_empty() {
-        writeln!(w)?;
+pub fn goal_edited(goal: &Goal, opts: &RenderOptions) -> Result<()> {
+    json_or(goal, opts, |w| {
         writeln!(
             w,
             "{} {}",
-            style("Cancelled").dim(),
-            style(format!("{} task(s)", cancelled_task_ids.len())).dim()
+            style("Updated goal:").green(),
+            style(goal.id()).cyan().bold()
         )?;
-    }
-
-    Ok(())
+        writeln!(w, "  {}", truncate(goal.description(), 80))?;
+        Ok(())
+    })
 }
 
-pub fn goal_restored(goal: &Goal) -> Result<()> {
-    let mut w = io::stdout().lock();
-    writeln!(
-        w,
-        "{} {}",
-        style("Restored goal:").green(),
-        style(goal.id()).cyan().bold()
-    )?;
-    writeln!(w, "  {}", truncate(goal.description(), 80))?;
-    Ok(())
+pub fn goal_cancelled(result: &GoalCancelResult, opts: &RenderOptions) -> Result<()> {
+    json_or(result, opts, |w| {
+        writeln!(
+            w,
+            "{} {}",
+            style("Cancelled goal:").dim(),
+            style(result.goal.id()).cyan().bold()
+        )?;
+        writeln!(w, "  {}", truncate(result.goal.description(), 80))?;
+
+        if !result.cancelled_task_ids.is_empty() {
+            writeln!(w)?;
+            writeln!(
+                w,
+                "{} {}",
+                style("Cancelled").dim(),
+                style(format!("{} task(s)", result.cancelled_task_ids.len())).dim()
+            )?;
+        }
+
+        Ok(())
+    })
+}
+
+pub fn goal_restored(goal: &Goal, opts: &RenderOptions) -> Result<()> {
+    json_or(goal, opts, |w| {
+        writeln!(
+            w,
+            "{} {}",
+            style("Restored goal:").green(),
+            style(goal.id()).cyan().bold()
+        )?;
+        writeln!(w, "  {}", truncate(goal.description(), 80))?;
+        Ok(())
+    })
 }
 
 // -- Clean outputs --
@@ -233,59 +237,62 @@ pub fn clean_removed(goal: &Goal, purge: bool) -> Result<()> {
     Ok(())
 }
 
-pub fn clean(result: &CleanResult) -> Result<()> {
-    let mut w = io::stdout().lock();
-    if result.candidates == 0 {
-        let msg = if result.force {
-            "No goals found."
-        } else {
-            "No completed or cancelled goals to clean."
-        };
-        writeln!(w, "{msg}")?;
-        return Ok(());
-    }
+pub fn clean(result: &CleanResult, opts: &RenderOptions) -> Result<()> {
+    json_or(result, opts, |w| {
+        if result.candidates == 0 {
+            let msg = if result.force {
+                "No goals found."
+            } else {
+                "No completed or cancelled goals to clean."
+            };
+            writeln!(w, "{msg}")?;
+            return Ok(());
+        }
 
-    let action = if result.purge { "Deleted" } else { "Archived" };
-    writeln!(
-        w,
-        "\n{} {} goal(s).",
-        action,
-        style(result.removed.len()).bold()
-    )?;
-    Ok(())
+        let action = if result.purge { "Deleted" } else { "Archived" };
+        writeln!(
+            w,
+            "\n{} {} goal(s).",
+            action,
+            style(result.removed.len()).bold()
+        )?;
+        Ok(())
+    })
 }
 
 // -- Init outputs --
 
-pub fn init(result: &InitResult) -> Result<()> {
-    let mut w = io::stdout().lock();
-    if result.already_initialized {
-        writeln!(
-            w,
-            "Radial already initialized in {}",
-            result.radial_dir.display()
-        )?;
-        return Ok(());
-    }
+pub fn init(result: &InitResult, opts: &RenderOptions) -> Result<()> {
+    json_or(result, opts, |w| {
+        if result.already_initialized {
+            writeln!(
+                w,
+                "Radial already initialized in {}",
+                result.radial_dir.display()
+            )?;
+            return Ok(());
+        }
 
-    if let Some(target) = result.gitignore_target {
-        writeln!(w, "Added .radial to {}", target.display_path())?;
-    }
+        if let Some(target) = result.gitignore_target {
+            writeln!(w, "Added .radial to {}", target.display_path())?;
+        }
 
-    writeln!(w, "Initialized radial in {}", result.radial_dir.display())?;
-    Ok(())
+        writeln!(w, "Initialized radial in {}", result.radial_dir.display())?;
+        Ok(())
+    })
 }
 
-pub fn task_edited(task: &Task) -> Result<()> {
-    let mut w = io::stdout().lock();
-    writeln!(
-        w,
-        "{} {}",
-        style("Updated task:").green(),
-        style(task.id()).cyan().bold()
-    )?;
-    writeln!(w, "  {}", truncate(task.description(), 80))?;
-    Ok(())
+pub fn task_edited(task: &Task, opts: &RenderOptions) -> Result<()> {
+    json_or(task, opts, |w| {
+        writeln!(
+            w,
+            "{} {}",
+            style("Updated task:").green(),
+            style(task.id()).cyan().bold()
+        )?;
+        writeln!(w, "  {}", truncate(task.description(), 80))?;
+        Ok(())
+    })
 }
 
 // -- Task outputs --
@@ -438,163 +445,172 @@ pub fn task_list(tasks: &[Task], goal: &Goal, opts: &RenderOptions) -> Result<()
     })
 }
 
-pub fn task_started(task: &Task) -> Result<()> {
-    let mut w = io::stdout().lock();
-    writeln!(
-        w,
-        "{} {}",
-        style("Started task:").green(),
-        style(task.id()).cyan().bold()
-    )?;
-    writeln!(w, "  {}", truncate(task.description(), 80))?;
-    if let Some(assignee) = task.assignee() {
-        writeln!(w, "  Assigned to: {assignee}")?;
-    }
-    Ok(())
-}
-
-pub fn task_released(task: &Task) -> Result<()> {
-    let mut w = io::stdout().lock();
-    writeln!(
-        w,
-        "{} {}",
-        style("Released task:").yellow(),
-        style(task.id()).cyan().bold()
-    )?;
-    writeln!(w, "  {}", truncate(task.description(), 80))?;
-    writeln!(w, "  State: {}", state_styled(task.state().as_ref()))?;
-    Ok(())
-}
-
-pub fn tasks_released_stale(tasks: &[Task]) -> Result<()> {
-    let mut w = io::stdout().lock();
-    if tasks.is_empty() {
-        writeln!(w, "No stale in-progress tasks found.")?;
-        return Ok(());
-    }
-    writeln!(w, "Released {} stale task(s):", style(tasks.len()).bold())?;
-    for task in tasks {
-        let assignee = task.assignee().unwrap_or("(none)");
-        writeln!(
-            w,
-            "  {} (assigned to {})",
-            style(task.id()).cyan(),
-            assignee,
-        )?;
-    }
-    Ok(())
-}
-
-pub fn tasks_released_all_in_progress(tasks: &[Task]) -> Result<()> {
-    let mut w = io::stdout().lock();
-    if tasks.is_empty() {
-        writeln!(w, "No in-progress tasks found.")?;
-        return Ok(());
-    }
-    writeln!(
-        w,
-        "Released {} task(s) from in-progress back to pending.",
-        style(tasks.len()).bold()
-    )?;
-    Ok(())
-}
-
-pub fn task_completed(result: &CompleteResult) -> Result<()> {
-    let mut w = io::stdout().lock();
-    writeln!(
-        w,
-        "{} {}",
-        style("Completed task:").green(),
-        style(result.task.id()).cyan().bold()
-    )?;
-    if let Some(res) = result.task.result() {
-        writeln!(w, "  {}", truncate(res.summary(), 80))?;
-    }
-
-    if !result.unblocked_task_ids.is_empty() {
-        writeln!(w)?;
-        writeln!(w, "{}", style("Unblocked tasks:").yellow())?;
-        for id in &result.unblocked_task_ids {
-            writeln!(w, "  - {}", style(id).cyan())?;
-        }
-    }
-    Ok(())
-}
-
-pub fn task_failed(task: &Task) -> Result<()> {
-    let mut w = io::stdout().lock();
-    writeln!(
-        w,
-        "{} {}",
-        style("Failed task:").red(),
-        style(task.id()).cyan().bold()
-    )?;
-    writeln!(w, "  {}", truncate(task.description(), 80))?;
-    Ok(())
-}
-
-pub fn task_cancelled(result: &CancelResult) -> Result<()> {
-    let mut w = io::stdout().lock();
-    writeln!(
-        w,
-        "{} {}",
-        style("Cancelled task:").dim(),
-        style(result.task.id()).cyan().bold()
-    )?;
-    writeln!(w, "  {}", truncate(result.task.description(), 80))?;
-
-    if !result.unblocked_task_ids.is_empty() {
-        writeln!(w)?;
+pub fn task_started(task: &Task, opts: &RenderOptions) -> Result<()> {
+    json_or(task, opts, |w| {
         writeln!(
             w,
             "{} {}",
-            style("Unblocked").yellow(),
-            style(format!("{} task(s):", result.unblocked_task_ids.len())).yellow()
+            style("Started task:").green(),
+            style(task.id()).cyan().bold()
         )?;
-        for id in &result.unblocked_task_ids {
-            writeln!(w, "  - {}", style(id).cyan())?;
+        writeln!(w, "  {}", truncate(task.description(), 80))?;
+        if let Some(assignee) = task.assignee() {
+            writeln!(w, "  Assigned to: {assignee}")?;
         }
-    }
+        Ok(())
+    })
+}
 
-    if !result.cascaded_task_ids.is_empty() {
-        writeln!(w)?;
+pub fn task_released(task: &Task, opts: &RenderOptions) -> Result<()> {
+    json_or(task, opts, |w| {
         writeln!(
             w,
             "{} {}",
-            style("Cascade-cancelled").dim(),
-            style(format!("{} task(s):", result.cascaded_task_ids.len())).dim()
+            style("Released task:").yellow(),
+            style(task.id()).cyan().bold()
         )?;
-        for id in &result.cascaded_task_ids {
-            writeln!(w, "  - {}", style(id).cyan())?;
+        writeln!(w, "  {}", truncate(task.description(), 80))?;
+        writeln!(w, "  State: {}", state_styled(task.state().as_ref()))?;
+        Ok(())
+    })
+}
+
+pub fn tasks_released_stale(tasks: &[Task], opts: &RenderOptions) -> Result<()> {
+    json_or(tasks, opts, |w| {
+        if tasks.is_empty() {
+            writeln!(w, "No stale in-progress tasks found.")?;
+            return Ok(());
         }
-    }
-
-    Ok(())
+        writeln!(w, "Released {} stale task(s):", style(tasks.len()).bold())?;
+        for task in tasks {
+            let assignee = task.assignee().unwrap_or("(none)");
+            writeln!(
+                w,
+                "  {} (assigned to {})",
+                style(task.id()).cyan(),
+                assignee,
+            )?;
+        }
+        Ok(())
+    })
 }
 
-pub fn task_retry(task: &Task) -> Result<()> {
-    let mut w = io::stdout().lock();
-    writeln!(
-        w,
-        "{} {}",
-        style("Retrying task:").yellow(),
-        style(task.id()).cyan().bold()
-    )?;
-    writeln!(w, "  {}", truncate(task.description(), 80))?;
-    writeln!(w, "  Retry count: {}", task.metrics().retry_count())?;
-    Ok(())
+pub fn tasks_released_all_in_progress(tasks: &[Task], opts: &RenderOptions) -> Result<()> {
+    json_or(tasks, opts, |w| {
+        if tasks.is_empty() {
+            writeln!(w, "No in-progress tasks found.")?;
+            return Ok(());
+        }
+        writeln!(
+            w,
+            "Released {} task(s) from in-progress back to pending.",
+            style(tasks.len()).bold()
+        )?;
+        Ok(())
+    })
 }
 
-pub fn task_deleted(task: &Task) -> Result<()> {
-    let mut w = io::stdout().lock();
-    writeln!(
-        w,
-        "{} {}",
-        style("Deleted task:").red(),
-        style(task.id()).cyan().bold()
-    )?;
-    writeln!(w, "  {}", truncate(task.description(), 80))?;
-    Ok(())
+pub fn task_completed(result: &CompleteResult, opts: &RenderOptions) -> Result<()> {
+    json_or(result, opts, |w| {
+        writeln!(
+            w,
+            "{} {}",
+            style("Completed task:").green(),
+            style(result.task.id()).cyan().bold()
+        )?;
+        if let Some(res) = result.task.result() {
+            writeln!(w, "  {}", truncate(res.summary(), 80))?;
+        }
+
+        if !result.unblocked_task_ids.is_empty() {
+            writeln!(w)?;
+            writeln!(w, "{}", style("Unblocked tasks:").yellow())?;
+            for id in &result.unblocked_task_ids {
+                writeln!(w, "  - {}", style(id).cyan())?;
+            }
+        }
+        Ok(())
+    })
+}
+
+pub fn task_failed(task: &Task, opts: &RenderOptions) -> Result<()> {
+    json_or(task, opts, |w| {
+        writeln!(
+            w,
+            "{} {}",
+            style("Failed task:").red(),
+            style(task.id()).cyan().bold()
+        )?;
+        writeln!(w, "  {}", truncate(task.description(), 80))?;
+        Ok(())
+    })
+}
+
+pub fn task_cancelled(result: &CancelResult, opts: &RenderOptions) -> Result<()> {
+    json_or(result, opts, |w| {
+        writeln!(
+            w,
+            "{} {}",
+            style("Cancelled task:").dim(),
+            style(result.task.id()).cyan().bold()
+        )?;
+        writeln!(w, "  {}", truncate(result.task.description(), 80))?;
+
+        if !result.unblocked_task_ids.is_empty() {
+            writeln!(w)?;
+            writeln!(
+                w,
+                "{} {}",
+                style("Unblocked").yellow(),
+                style(format!("{} task(s):", result.unblocked_task_ids.len())).yellow()
+            )?;
+            for id in &result.unblocked_task_ids {
+                writeln!(w, "  - {}", style(id).cyan())?;
+            }
+        }
+
+        if !result.cascaded_task_ids.is_empty() {
+            writeln!(w)?;
+            writeln!(
+                w,
+                "{} {}",
+                style("Cascade-cancelled").dim(),
+                style(format!("{} task(s):", result.cascaded_task_ids.len())).dim()
+            )?;
+            for id in &result.cascaded_task_ids {
+                writeln!(w, "  - {}", style(id).cyan())?;
+            }
+        }
+
+        Ok(())
+    })
+}
+
+pub fn task_retry(task: &Task, opts: &RenderOptions) -> Result<()> {
+    json_or(task, opts, |w| {
+        writeln!(
+            w,
+            "{} {}",
+            style("Retrying task:").yellow(),
+            style(task.id()).cyan().bold()
+        )?;
+        writeln!(w, "  {}", truncate(task.description(), 80))?;
+        writeln!(w, "  Retry count: {}", task.metrics().retry_count())?;
+        Ok(())
+    })
+}
+
+pub fn task_deleted(task: &Task, opts: &RenderOptions) -> Result<()> {
+    json_or(task, opts, |w| {
+        writeln!(
+            w,
+            "{} {}",
+            style("Deleted task:").red(),
+            style(task.id()).cyan().bold()
+        )?;
+        writeln!(w, "  {}", truncate(task.description(), 80))?;
+        Ok(())
+    })
 }
 
 pub fn task_comments(task: &Task, opts: &RenderOptions) -> Result<()> {
@@ -1145,10 +1161,11 @@ pub fn list(results: &[GoalWithTasks], opts: &RenderOptions) -> Result<()> {
 
 // -- Prep --
 
-pub fn prep(text: &str) -> Result<()> {
-    let mut w = io::stdout().lock();
-    writeln!(w, "{text}")?;
-    Ok(())
+pub fn prep(text: &str, opts: &RenderOptions) -> Result<()> {
+    json_or(&serde_json::json!({ "guide": text }), opts, |w| {
+        writeln!(w, "{text}")?;
+        Ok(())
+    })
 }
 
 // -- Compact --
@@ -1184,15 +1201,16 @@ pub fn compact_analyze(candidates: &[CompactCandidate], opts: &RenderOptions) ->
     })
 }
 
-pub fn compact_apply(task_id: &str) -> Result<()> {
-    let mut w = io::stdout().lock();
-    writeln!(
-        w,
-        "{} {}",
-        style("Compacted task:").green(),
-        style(task_id).cyan().bold()
-    )?;
-    Ok(())
+pub fn compact_apply(task_id: &str, opts: &RenderOptions) -> Result<()> {
+    json_or(&serde_json::json!({ "task_id": task_id }), opts, |w| {
+        writeln!(
+            w,
+            "{} {}",
+            style("Compacted task:").green(),
+            style(task_id).cyan().bold()
+        )?;
+        Ok(())
+    })
 }
 
 // -- Helpers --
