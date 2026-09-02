@@ -9,15 +9,22 @@ use crate::models::{Goal, Metrics, Task};
 #[derive(Debug, Serialize)]
 #[serde(untagged)]
 pub enum ShowResult {
+    /// A goal, its tasks, and its aggregate metrics.
     Goal {
+        /// The goal.
         #[serde(flatten)]
         goal: Goal,
+        /// The goal's tasks.
         tasks: Vec<Task>,
+        /// The goal's aggregate metrics.
         metrics: Metrics,
     },
+    /// A single task.
     Task(Task),
 }
 
+/// Resolve an ID (task or goal, by prefix or full ID) and return its full
+/// detail view. Tries task resolution first, then goal.
 pub fn run(id: &str, db: &Database) -> Result<ShowResult> {
     // Try task first (more common lookup), then goal
     if let Some(task) = db

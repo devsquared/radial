@@ -4,6 +4,9 @@ use crate::db::Database;
 use crate::id::GoalId;
 use crate::models::{Priority, Task, TaskState};
 
+/// List a goal's ready-to-start tasks: pending, with a contract, no
+/// subtasks, and (optionally) matching the given priority. Each task is
+/// paired with its parent task, if it has one.
 pub fn run(
     goal_id: &GoalId,
     priority: Option<&Priority>,

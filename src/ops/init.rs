@@ -9,11 +9,14 @@ use crate::db::Database;
 /// Where `.radial` got added for git exclusion, if it did.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum GitignoreTarget {
+    /// `.git/info/exclude` — a truly local exclusion, not tracked by git.
     Exclude,
+    /// `.gitignore` — tracked and shared with the rest of the repo.
     Gitignore,
 }
 
 impl GitignoreTarget {
+    /// The path of the file this target refers to, relative to the repo root.
     pub fn display_path(self) -> &'static str {
         match self {
             GitignoreTarget::Exclude => ".git/info/exclude",
@@ -22,13 +25,23 @@ impl GitignoreTarget {
     }
 }
 
+/// Result of initializing a `.radial/` directory.
 #[derive(Debug)]
 pub struct InitResult {
+    /// Path to the `.radial/` directory that was created (or already existed).
     pub radial_dir: PathBuf,
+    /// Whether `.radial/` already existed, in which case nothing was created.
     pub already_initialized: bool,
+    /// Which git exclusion file `.radial` was added to, if `stealth` was set
+    /// and it wasn't already excluded.
     pub gitignore_target: Option<GitignoreTarget>,
 }
 
+/// Create a new `.radial/` directory in the current working directory.
+///
+/// If `stealth` is set and a git repository is detected, also adds `.radial`
+/// to a git exclusion file (preferring `.git/info/exclude` over
+/// `.gitignore`) so it isn't tracked. Does nothing if `.radial/` already exists.
 pub fn run(stealth: bool) -> Result<InitResult> {
     let radial_dir = PathBuf::from(RADIAL_DIR);
 

@@ -1,13 +1,30 @@
+//! Radial is a task orchestration library for breaking goals into tracked,
+//! verifiable tasks connected by contracts.
+//!
+//! The public API is the domain vocabulary (see [`models`]) plus the
+//! operations that act on it (see [`ops`]): construct or open a
+//! [`Database`], then drive it through [`ops`] functions such as
+//! [`ops::goal::create`] and [`ops::task::start`].
+//!
+//! The `rd` binary built from this crate is a thin CLI shell over the same
+//! [`ops`] functions; it is not part of the published surface.
+
 #![allow(clippy::missing_errors_doc)]
 #![allow(clippy::missing_panics_doc)]
 #![allow(clippy::must_use_candidate)]
+#![warn(missing_docs)]
 
 pub(crate) mod cli;
+/// Persistence layer: the [`Database`] handle, file locking, and directory discovery.
 pub mod db;
+/// Parsing of human-readable stale-duration strings (e.g. `"2h"`, `"30m"`).
 pub mod duration;
 pub(crate) mod helpers;
+/// Identifier types for goals and tasks.
 pub mod id;
+/// Domain types: [`models::Goal`], [`models::Task`], and the values they are built from.
 pub mod models;
+/// Pure operations on a [`Database`] that implement the library's supported API.
 pub mod ops;
 pub(crate) mod output;
 
@@ -24,6 +41,7 @@ use cli::{Cli, Commands, CompactCommands, EditCommands, GoalCommands, TaskComman
 use output::RenderOptions;
 use std::path::{Path, PathBuf};
 
+/// Name of the directory radial stores its state in, relative to a project root.
 pub const RADIAL_DIR: &str = ".radial";
 pub(crate) const REDIRECT_FILE: &str = "redirect";
 

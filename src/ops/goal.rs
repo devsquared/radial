@@ -7,6 +7,7 @@ use crate::id::{GoalId, TaskId};
 use crate::models::{Goal, GoalState, Metrics, TaskState};
 use crate::ops::task;
 
+/// Create a new goal with the next sequence number.
 pub fn create(description: String, db: &mut Database) -> Result<Goal> {
     let now = Timestamp::now();
     let seq = db.next_goal_seq();
@@ -25,6 +26,7 @@ pub fn create(description: String, db: &mut Database) -> Result<Goal> {
     Ok(goal)
 }
 
+/// List every non-archived goal.
 pub fn list(db: &Database) -> Vec<Goal> {
     db.list_goals().into_iter().cloned().collect()
 }
