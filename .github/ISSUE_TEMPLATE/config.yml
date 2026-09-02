@@ -1,0 +1,5 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Question or discussion
+    url: https://github.com/devsquared/radial/discussions
+    about: For usage questions or open-ended discussion, not bug reports or feature requests.

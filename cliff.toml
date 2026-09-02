@@ -1,0 +1,58 @@
+[changelog]
+header = """
+# Changelog
+
+All notable changes to this project are documented in this file.
+Generated from [conventional commits](https://www.conventionalcommits.org/) with [git-cliff](https://git-cliff.org/).
+
+"""
+body = """
+{% if version %}\
+    ## [{{ version | trim_start_matches(pat="v") }}]{% if release_link %}({{ release_link }}){% endif %} - {{ timestamp | date(format="%Y-%m-%d") }}
+{% else %}\
+    ## [Unreleased]
+{% endif %}\
+{% for group, commits in commits | group_by(attribute="group") %}
+    ### {{ group | striptags | trim | upper_first }}
+    {% for commit in commits %}
+        - {{ commit.message | upper_first }}\
+    {% endfor %}
+{% endfor %}\n\
+"""
+trim = true
+footer = ""
+
+[git]
+conventional_commits = true
+filter_unconventional = true
+split_commits = false
+protect_breaking_commits = false
+filter_commits = false
+tag_pattern = "v[0-9]*"
+sort_commits = "oldest"
+commit_preprocessors = []
+link_parsers = []
+ignore_tags = ""
+topo_order = false
+
+commit_parsers = [
+  { message = "(?i)^feat", group = "Features" },
+  { message = "^fix", group = "Bug Fixes" },
+  { message = "^doc", group = "Documentation" },
+  { message = "^perf", group = "Performance" },
+  { message = "^refactor", group = "Refactor" },
+  { message = "^test", group = "Testing" },
+  { message = "^chore\\(release\\)", skip = true },
+  { message = "^chore", group = "Miscellaneous Tasks" },
+  { message = "^ci", group = "Miscellaneous Tasks" },
+  { message = "^style", group = "Miscellaneous Tasks" },
+  { message = "^Merge pull request", skip = true },
+  { message = "^Merge branch", skip = true },
+]
+
+[remote.github]
+owner = "devsquared"
+repo = "radial"
+
+[bump]
+initial_tag = "v0.1.0"
