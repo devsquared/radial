@@ -10,7 +10,7 @@ use crate::id::{GoalId, TaskId};
 )]
 #[serde(rename_all = "lowercase")]
 #[strum(serialize_all = "lowercase")]
-#[derive(Default, clap::ValueEnum)]
+#[derive(Default)]
 #[non_exhaustive]
 pub enum Priority {
     P0,
