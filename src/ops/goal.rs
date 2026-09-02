@@ -1,11 +1,21 @@
 use anyhow::{Result, anyhow};
 use jiff::Timestamp;
+use serde::Serialize;
 
 use crate::db::Database;
 use crate::helpers::find_similar_id;
 use crate::id::{GoalId, TaskId};
 use crate::models::{Goal, GoalState, Metrics, TaskState};
 use crate::ops::task;
+
+/// Result of cancelling a goal, including which tasks were cancelled with it.
+#[derive(Debug, Serialize)]
+pub struct GoalCancelResult {
+    /// The cancelled goal.
+    pub goal: Goal,
+    /// IDs of tasks that were cancelled along with the goal.
+    pub cancelled_task_ids: Vec<TaskId>,
+}
 
 /// Create a new goal with the next sequence number.
 pub fn create(description: String, db: &mut Database) -> Result<Goal> {
@@ -39,7 +49,7 @@ pub fn cancel(
     reason: Option<String>,
     author: &str,
     db: &mut Database,
-) -> Result<(Goal, Vec<TaskId>)> {
+) -> Result<GoalCancelResult> {
     let goal = db.get_goal(goal_id).ok_or_else(|| {
         let all_goals = db.list_goals();
         let goal_ids: Vec<&str> = all_goals.iter().map(|g| g.id().as_ref()).collect();
@@ -85,5 +95,8 @@ pub fn cancel(
     let cancelled_goal = goal_mut.clone();
     db.save_goal(&cancelled_goal)?;
 
-    Ok((cancelled_goal, cancelled_task_ids))
+    Ok(GoalCancelResult {
+        goal: cancelled_goal,
+        cancelled_task_ids,
+    })
 }

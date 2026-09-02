@@ -1,4 +1,5 @@
 use anyhow::{Context, Result};
+use serde::Serialize;
 use std::fs::{self, OpenOptions};
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -7,7 +8,8 @@ use crate::RADIAL_DIR;
 use crate::db::Database;
 
 /// Where `.radial` got added for git exclusion, if it did.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
 pub enum GitignoreTarget {
     /// `.git/info/exclude` — a truly local exclusion, not tracked by git.
     Exclude,
@@ -26,7 +28,7 @@ impl GitignoreTarget {
 }
 
 /// Result of initializing a `.radial/` directory.
-#[derive(Debug)]
+#[derive(Debug, Serialize)]
 pub struct InitResult {
     /// Path to the `.radial/` directory that was created (or already existed).
     pub radial_dir: PathBuf,

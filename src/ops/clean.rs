@@ -1,10 +1,11 @@
 use anyhow::Result;
+use serde::Serialize;
 
 use crate::db::Database;
 use crate::models::{Goal, GoalState};
 
 /// Result of a `clean` run: what was found and what got removed.
-#[derive(Debug)]
+#[derive(Debug, Serialize)]
 pub struct CleanResult {
     /// Number of goals eligible for cleaning.
     pub candidates: usize,

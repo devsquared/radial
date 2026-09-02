@@ -1,4 +1,5 @@
 use clap::{Parser, Subcommand};
+use clap_complete::Shell;
 
 use crate::models::Priority;
 
@@ -17,6 +18,10 @@ pub enum Commands {
         /// Initialize without committing to the repo (adds .radial to .gitignore or .git/info/exclude)
         #[arg(long)]
         stealth: bool,
+
+        /// Output as JSON
+        #[arg(long)]
+        json: bool,
     },
 
     /// Manage goals
@@ -70,12 +75,20 @@ pub enum Commands {
         /// Permanently delete instead of archiving
         #[arg(long)]
         purge: bool,
+
+        /// Output as JSON. Implies non-interactive removal, as if --all were set
+        #[arg(long)]
+        json: bool,
     },
 
     /// Restore an archived goal
     Restore {
         /// Goal ID to restore from archive
         goal_id: String,
+
+        /// Output as JSON
+        #[arg(long)]
+        json: bool,
     },
 
     /// Show status of goals and tasks
@@ -99,8 +112,9 @@ pub enum Commands {
 
     /// Show tasks ready to be worked on
     Ready {
-        /// The goal ID to check for ready tasks
-        goal_id: String,
+        /// The goal ID to check for ready tasks. If omitted, uses the single
+        /// active goal, if there is exactly one
+        goal_id: Option<String>,
 
         /// Filter by priority level (p0, p1, p2, p3)
         #[arg(long)]
@@ -112,11 +126,24 @@ pub enum Commands {
     },
 
     /// Output a preparation guide for LLM agents
-    Prep,
+    Prep {
+        /// Output as JSON
+        #[arg(long)]
+        json: bool,
+    },
 
     /// Compact completed/failed tasks into summaries
     #[command(subcommand)]
     Compact(CompactCommands),
+
+    /// Generate a shell completion script
+    ///
+    /// Print the script to stdout and source it, e.g. for zsh:
+    /// `radial completions zsh > "${fpath[1]}/_radial"`
+    Completions {
+        /// The shell to generate completions for
+        shell: Shell,
+    },
 }
 
 #[derive(Subcommand)]
@@ -146,6 +173,10 @@ pub enum GoalCommands {
         /// Reason for cancellation
         #[arg(long)]
         reason: Option<String>,
+
+        /// Output as JSON
+        #[arg(long)]
+        json: bool,
     },
 }
 
@@ -190,8 +221,9 @@ pub enum TaskCommands {
 
     /// List tasks for a goal
     List {
-        /// The goal ID to list tasks for
-        goal_id: String,
+        /// The goal ID to list tasks for. If omitted, uses the single active
+        /// goal, if there is exactly one
+        goal_id: Option<String>,
 
         /// Filter by priority level (p0, p1, p2, p3)
         #[arg(long)]
@@ -226,6 +258,10 @@ pub enum TaskCommands {
         /// Override blocked state and start anyway
         #[arg(long)]
         force: bool,
+
+        /// Output as JSON
+        #[arg(long)]
+        json: bool,
     },
 
     /// Mark a task as completed
@@ -245,9 +281,13 @@ pub enum TaskCommands {
         #[arg(long)]
         tokens: Option<i64>,
 
-        /// Elapsed time in milliseconds
+        /// Elapsed time in milliseconds. Derived from the task's start time if omitted
         #[arg(long)]
         elapsed: Option<i64>,
+
+        /// Output as JSON
+        #[arg(long)]
+        json: bool,
     },
 
     /// Mark a task as failed
@@ -262,6 +302,10 @@ pub enum TaskCommands {
         /// Compact the task immediately using the reason as its summary
         #[arg(long, requires = "reason")]
         compact: bool,
+
+        /// Output as JSON
+        #[arg(long)]
+        json: bool,
     },
 
     /// Cancel a task that is no longer needed
@@ -276,12 +320,20 @@ pub enum TaskCommands {
         /// Cascade cancellation to all downstream dependent tasks
         #[arg(long)]
         cascade: bool,
+
+        /// Output as JSON
+        #[arg(long)]
+        json: bool,
     },
 
     /// Retry a failed task
     Retry {
         /// The task ID to retry
         task_id: String,
+
+        /// Output as JSON
+        #[arg(long)]
+        json: bool,
     },
 
     /// Release a claimed task back to pending
@@ -296,12 +348,20 @@ pub enum TaskCommands {
         /// Release all in-progress tasks regardless of duration
         #[arg(long, conflicts_with_all = ["task_id", "stale"])]
         all_in_progress: bool,
+
+        /// Output as JSON
+        #[arg(long)]
+        json: bool,
     },
 
     /// Delete a pending task
     Delete {
         /// The task ID to delete
         task_id: String,
+
+        /// Output as JSON
+        #[arg(long)]
+        json: bool,
     },
 
     /// Add a comment to a task
@@ -311,12 +371,20 @@ pub enum TaskCommands {
 
         /// The comment text
         text: String,
+
+        /// Output as JSON
+        #[arg(long)]
+        json: bool,
     },
 
     /// View all comments on a task
     Comments {
         /// The task ID to view comments for
         task_id: String,
+
+        /// Output as JSON
+        #[arg(long)]
+        json: bool,
     },
 }
 
@@ -330,6 +398,10 @@ pub enum EditCommands {
         /// New description
         #[arg(long)]
         description: String,
+
+        /// Output as JSON
+        #[arg(long)]
+        json: bool,
     },
 
     /// Edit a task's description or contract
@@ -360,6 +432,10 @@ pub enum EditCommands {
         /// Add a blocked-by dependency (comma or space separated)
         #[arg(long, value_delimiter = ',', num_args = 1..)]
         blocked_by: Option<Vec<String>>,
+
+        /// Output as JSON
+        #[arg(long)]
+        json: bool,
     },
 }
 
@@ -384,5 +460,9 @@ pub enum CompactCommands {
         /// The summary to replace the task's detailed content
         #[arg(long)]
         summary: String,
+
+        /// Output as JSON
+        #[arg(long)]
+        json: bool,
     },
 }

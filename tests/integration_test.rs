@@ -737,6 +737,264 @@ fn test_json_output_task_list() {
 }
 
 #[test]
+fn test_json_output_task_start_and_complete() {
+    let env = TestEnv::new();
+    env.run(&["init"]).expect("Init failed");
+
+    let output = env
+        .run(&["goal", "create", "Start/complete JSON test"])
+        .expect("Create goal failed");
+    let goal_id = output
+        .lines()
+        .find(|line| line.contains("Created goal:"))
+        .and_then(|line| line.split_whitespace().nth(2))
+        .unwrap();
+
+    let output = env
+        .run(&[
+            "task",
+            "create",
+            goal_id,
+            "JSON start/complete task",
+            "--receives",
+            "Input data",
+            "--produces",
+            "Output data",
+            "--verify",
+            "Data is processed",
+            "--json",
+        ])
+        .expect("Create task failed");
+    let created: Value = serde_json::from_str(&output).expect("Should be valid JSON");
+    let task_id = created["id"].as_str().unwrap();
+
+    let output = env
+        .run(&["task", "start", task_id, "--assignee", "tester", "--json"])
+        .expect("Start task --json failed");
+    let started: Value = serde_json::from_str(&output).expect("Should be valid JSON");
+    assert_eq!(started["state"], "inprogress");
+    assert_eq!(started["assignee"], "tester");
+
+    let output = env
+        .run(&["task", "complete", task_id, "--result", "Done", "--json"])
+        .expect("Complete task --json failed");
+    let completed: Value = serde_json::from_str(&output).expect("Should be valid JSON");
+    assert_eq!(completed["task"]["state"], "completed");
+    assert!(completed["unblocked_task_ids"].is_array());
+}
+
+#[test]
+fn test_json_output_init() {
+    let env = TestEnv::new();
+
+    let output = env.run(&["init", "--json"]).expect("Init --json failed");
+    let init: Value = serde_json::from_str(&output).expect("Should be valid JSON");
+    assert_eq!(init["already_initialized"], false);
+
+    let output = env.run(&["init", "--json"]).expect("Init --json failed");
+    let init_again: Value = serde_json::from_str(&output).expect("Should be valid JSON");
+    assert_eq!(init_again["already_initialized"], true);
+}
+
+#[test]
+fn test_json_output_edit_and_task_lifecycle_mutations() {
+    let env = TestEnv::new();
+    env.run(&["init"]).expect("Init failed");
+
+    let output = env
+        .run(&["goal", "create", "JSON lifecycle coverage"])
+        .expect("Create goal failed");
+    let goal_id = output
+        .lines()
+        .find(|line| line.contains("Created goal:"))
+        .and_then(|line| line.split_whitespace().nth(2))
+        .unwrap()
+        .to_string();
+
+    let output = env
+        .run(&[
+            "edit",
+            "goal",
+            &goal_id,
+            "--description",
+            "Renamed",
+            "--json",
+        ])
+        .expect("Edit goal --json failed");
+    let edited: Value = serde_json::from_str(&output).expect("Should be valid JSON");
+    assert_eq!(edited["description"], "Renamed");
+
+    let output = env
+        .run(&[
+            "task",
+            "create",
+            &goal_id,
+            "Fail me",
+            "--receives",
+            "r",
+            "--produces",
+            "p",
+            "--verify",
+            "v",
+            "--json",
+        ])
+        .expect("Create task failed");
+    let task: Value = serde_json::from_str(&output).expect("Should be valid JSON");
+    let task_id = task["id"].as_str().unwrap().to_string();
+
+    let output = env
+        .run(&[
+            "edit",
+            "task",
+            &task_id,
+            "--description",
+            "Fail me too",
+            "--json",
+        ])
+        .expect("Edit task --json failed");
+    let edited_task: Value = serde_json::from_str(&output).expect("Should be valid JSON");
+    assert_eq!(edited_task["description"], "Fail me too");
+
+    env.run(&["task", "start", &task_id, "--assignee", "tester"])
+        .expect("Start task failed");
+
+    let output = env
+        .run(&["task", "fail", &task_id, "--reason", "broke", "--json"])
+        .expect("Fail task --json failed");
+    let failed: Value = serde_json::from_str(&output).expect("Should be valid JSON");
+    assert_eq!(failed["state"], "failed");
+
+    let output = env
+        .run(&["task", "retry", &task_id, "--json"])
+        .expect("Retry task --json failed");
+    let retried: Value = serde_json::from_str(&output).expect("Should be valid JSON");
+    assert_eq!(retried["state"], "inprogress");
+
+    let output = env
+        .run(&["task", "release", &task_id, "--json"])
+        .expect("Release task --json failed");
+    let released: Value = serde_json::from_str(&output).expect("Should be valid JSON");
+    assert_eq!(released["state"], "pending");
+
+    let output = env
+        .run(&["task", "release", "--all-in-progress", "--json"])
+        .expect("Release --all-in-progress --json failed");
+    let released_all: Value = serde_json::from_str(&output).expect("Should be valid JSON");
+    assert!(released_all.is_array());
+
+    let output = env
+        .run(&[
+            "task",
+            "cancel",
+            &task_id,
+            "--reason",
+            "no longer needed",
+            "--json",
+        ])
+        .expect("Cancel task --json failed");
+    let cancelled: Value = serde_json::from_str(&output).expect("Should be valid JSON");
+    assert_eq!(cancelled["task"]["state"], "cancelled");
+    assert!(cancelled["unblocked_task_ids"].is_array());
+    assert!(cancelled["cascaded_task_ids"].is_array());
+
+    let output = env
+        .run(&["task", "create", &goal_id, "Delete me", "--json"])
+        .expect("Create task failed");
+    let deletable: Value = serde_json::from_str(&output).expect("Should be valid JSON");
+    let deletable_id = deletable["id"].as_str().unwrap();
+    let output = env
+        .run(&["task", "delete", deletable_id, "--json"])
+        .expect("Delete task --json failed");
+    let deleted: Value = serde_json::from_str(&output).expect("Should be valid JSON");
+    assert_eq!(deleted["id"], deletable_id);
+}
+
+#[test]
+fn test_json_output_goal_lifecycle_and_prep_and_compact() {
+    let env = TestEnv::new();
+    env.run(&["init"]).expect("Init failed");
+
+    let output = env
+        .run(&["goal", "create", "JSON goal lifecycle coverage"])
+        .expect("Create goal failed");
+    let goal_id = output
+        .lines()
+        .find(|line| line.contains("Created goal:"))
+        .and_then(|line| line.split_whitespace().nth(2))
+        .unwrap()
+        .to_string();
+
+    let output = env
+        .run(&[
+            "goal",
+            "cancel",
+            &goal_id,
+            "--reason",
+            "wrapping up",
+            "--json",
+        ])
+        .expect("Cancel goal --json failed");
+    let goal_cancelled: Value = serde_json::from_str(&output).expect("Should be valid JSON");
+    assert_eq!(goal_cancelled["goal"]["state"], "cancelled");
+    assert!(goal_cancelled["cancelled_task_ids"].is_array());
+
+    let output = env.run(&["clean", "--json"]).expect("Clean --json failed");
+    let cleaned: Value = serde_json::from_str(&output).expect("Should be valid JSON");
+    assert_eq!(cleaned["candidates"], 1);
+    assert_eq!(cleaned["removed"].as_array().unwrap().len(), 1);
+
+    let output = env
+        .run(&["restore", &goal_id, "--json"])
+        .expect("Restore --json failed");
+    let restored: Value = serde_json::from_str(&output).expect("Should be valid JSON");
+    assert_eq!(restored["id"], goal_id);
+
+    let output = env.run(&["prep", "--json"]).expect("Prep --json failed");
+    let prep: Value = serde_json::from_str(&output).expect("Should be valid JSON");
+    assert!(prep["guide"].as_str().unwrap().contains("rd"));
+
+    let output = env
+        .run(&[
+            "task",
+            "create",
+            &goal_id,
+            "Compact me",
+            "--receives",
+            "r",
+            "--produces",
+            "p",
+            "--verify",
+            "v",
+            "--json",
+        ])
+        .expect("Create task failed");
+    let compactable: Value = serde_json::from_str(&output).expect("Should be valid JSON");
+    let compactable_id = compactable["id"].as_str().unwrap().to_string();
+    env.run(&["task", "start", &compactable_id, "--assignee", "tester"])
+        .expect("Start task failed");
+    env.run(&[
+        "task",
+        "fail",
+        &compactable_id,
+        "--reason",
+        "for compaction test",
+    ])
+    .expect("Fail task failed");
+    let output = env
+        .run(&[
+            "compact",
+            "apply",
+            &compactable_id,
+            "--summary",
+            "short",
+            "--json",
+        ])
+        .expect("Compact apply --json failed");
+    let compacted: Value = serde_json::from_str(&output).expect("Should be valid JSON");
+    assert_eq!(compacted["task_id"], compactable_id);
+}
+
+#[test]
 fn test_json_output_status() {
     let env = TestEnv::new();
     env.run(&["init"]).expect("Init failed");
@@ -2563,4 +2821,109 @@ fn test_display_ref_usage() {
     // Test that task JSON includes ref field
     let output = env.run(&["list", "--json"]).expect("List JSON failed");
     assert!(output.contains("\"ref\":"));
+}
+
+#[test]
+fn test_ready_and_task_list_default_to_single_active_goal() {
+    let env = TestEnv::new();
+    env.run(&["init"]).expect("Init failed");
+
+    // No goals at all: bare ready/list should error, not panic.
+    let err = env
+        .run(&["ready"])
+        .expect_err("Expected no-active-goal error");
+    assert!(err.contains("No active goals found"));
+    let err = env
+        .run(&["task", "list"])
+        .expect_err("Expected no-active-goal error");
+    assert!(err.contains("No active goals found"));
+
+    // Exactly one active goal: bare ready/list should resolve to it.
+    let output = env
+        .run(&["goal", "create", "Only active goal"])
+        .expect("Create goal failed");
+    let goal_id = output
+        .lines()
+        .find(|line| line.contains("Created goal:"))
+        .and_then(|line| line.split_whitespace().nth(2))
+        .unwrap()
+        .to_string();
+
+    let ready_output = env.run(&["ready"]).expect("Bare ready failed");
+    assert!(ready_output.contains(&goal_id) || ready_output.contains("No tasks ready"));
+
+    let list_output = env.run(&["task", "list"]).expect("Bare task list failed");
+    assert!(list_output.contains(&goal_id));
+
+    // A second active goal makes the bare form ambiguous.
+    env.run(&["goal", "create", "Second active goal"])
+        .expect("Create second goal failed");
+    let err = env
+        .run(&["ready"])
+        .expect_err("Expected ambiguous-goal error");
+    assert!(err.contains("Multiple active goals found"));
+    let err = env
+        .run(&["task", "list"])
+        .expect_err("Expected ambiguous-goal error");
+    assert!(err.contains("Multiple active goals found"));
+
+    // Explicit goal ID still works regardless of ambiguity.
+    env.run(&["ready", &goal_id])
+        .expect("Explicit ready failed");
+    env.run(&["task", "list", &goal_id])
+        .expect("Explicit task list failed");
+}
+
+#[test]
+fn test_shell_completions() {
+    let env = TestEnv::new();
+
+    for shell in ["bash", "zsh", "fish", "elvish", "powershell"] {
+        let output = env
+            .run(&["completions", shell])
+            .unwrap_or_else(|e| panic!("completions {shell} failed: {e}"));
+        assert!(
+            output.contains("rd"),
+            "{shell} completions should reference the 'rd' binary name"
+        );
+    }
+
+    let err = env
+        .run(&["completions", "not-a-shell"])
+        .expect_err("Expected invalid shell to fail");
+    assert!(!err.is_empty());
+}
+
+#[test]
+fn test_json_output_task_comment_and_comments() {
+    let env = TestEnv::new();
+    env.run(&["init"]).expect("Init failed");
+
+    let output = env
+        .run(&["goal", "create", "Comment JSON coverage"])
+        .expect("Create goal failed");
+    let goal_id = output
+        .lines()
+        .find(|line| line.contains("Created goal:"))
+        .and_then(|line| line.split_whitespace().nth(2))
+        .unwrap()
+        .to_string();
+
+    let output = env
+        .run(&["task", "create", &goal_id, "Comment me", "--json"])
+        .expect("Create task failed");
+    let task: Value = serde_json::from_str(&output).expect("Should be valid JSON");
+    let task_id = task["id"].as_str().unwrap().to_string();
+
+    let output = env
+        .run(&["task", "comment", &task_id, "a note", "--json"])
+        .expect("Comment --json failed");
+    let commented: Value = serde_json::from_str(&output).expect("Should be valid JSON");
+    assert_eq!(commented["comments"][0]["text"], "a note");
+
+    let output = env
+        .run(&["task", "comments", &task_id, "--json"])
+        .expect("Comments --json failed");
+    let comments: Value = serde_json::from_str(&output).expect("Should be valid JSON");
+    assert_eq!(comments["comments"][0]["text"], "a note");
 }
