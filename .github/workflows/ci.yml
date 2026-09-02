@@ -29,6 +29,9 @@ jobs:
       - name: Clippy
         run: cargo clippy --all-targets -- -D warnings -W clippy::pedantic
 
+      - name: Seam check
+        run: ./ci/check-seam.sh
+
       - uses: taiki-e/install-action@nextest
       - name: Test
         run: cargo nextest run --all-targets
