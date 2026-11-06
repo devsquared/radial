@@ -135,6 +135,9 @@ walkthrough aimed at agents. Almost every command also accepts `--json` for mach
 | `rd task fail <task-id> [--reason <text>] [--compact]` | Mark a task as failed |
 | `rd task cancel <task-id> [--reason <text>] [--cascade]` | Cancel a task that's no longer needed. `--cascade` also cancels its downstream dependents |
 | `rd task retry <task-id>` | Retry a failed task; moves it to `pending` (not `in_progress`) and records the prior result as a comment |
+| `rd task submit <task-id>` | Submit an in-progress task for review; moves it to `verifying` with no result yet |
+| `rd task accept <task-id> --result <summary> [--artifacts <paths>] [--tokens <n>] [--elapsed <ms>]` | Accept a task under review, completing it the same way `complete` does |
+| `rd task reject <task-id> --reason <text>` | Reject a task under review; moves it back to `in_progress` for rework and records the reason as a comment |
 | `rd task release <task-id>` | Release a claimed task back to `pending` |
 | `rd task release --stale <duration>` | Release tasks that have been in progress longer than `<duration>` (e.g. `1h`, `30m`) |
 | `rd task release --all-in-progress` | Release every in-progress task, regardless of duration |
@@ -201,7 +204,7 @@ rd edit task <task-id> \
 
 A task can have subtasks by passing `--parent` at creation. Subtasks are one level deep — a subtask
 cannot itself have subtasks — and follow the same lifecycle as any other task. A parent task can't be
-started, completed, failed, retried, or released directly; work happens on its subtasks, and the
+started, completed, failed, retried, submitted, accepted, rejected, or released directly; work happens on its subtasks, and the
 parent transitions to `completed` automatically once all of them are resolved.
 
 ```bash

@@ -73,8 +73,8 @@ Rules for subtasks:
 
 - Subtasks cannot themselves have subtasks (one level only).
 - Subtasks cannot be added to a completed or failed parent.
-- A parent task cannot be started, completed, failed, retried, or released directly — work on its
-  subtasks instead.
+- A parent task cannot be started, completed, failed, retried, submitted, accepted, rejected, or
+  released directly — work on its subtasks instead.
 - The parent transitions to `completed` automatically when all subtasks complete.
 
 ### Task Lifecycle
@@ -95,6 +95,25 @@ rd task release --stale 1h                       # Release tasks in progress > 1
 rd task release --all-in-progress                # Release all in-progress tasks
 rd task delete <task_id>                         # Delete a pending task
 ```
+
+### Review
+
+For tasks whose contract calls for a review step before completion, submit for review instead
+of completing directly, then have a reviewer accept or reject the work:
+
+```bash
+rd task submit <task_id>                                  # in_progress -> verifying, no result yet
+rd task accept <task_id> --result "Looks good, ships as-is" # verifying -> completed (same effects as complete)
+rd task reject <task_id> --reason "Missing the empty-input case" # verifying -> in_progress, rework
+```
+
+`accept` takes the same `--result`/`--artifacts`/`--tokens`/`--elapsed` flags as `complete` and has
+the same effects (unblocking downstream tasks, syncing the parent, refreshing goal metrics).
+`reject` sends the task back to `in_progress` directly — unlike `retry`, no fresh `start` is
+needed, since review only follows an active `in_progress` attempt. The rejection reason is
+recorded as a comment tagged with the attempt number, and counts toward the same retry counter
+as `retry`. A `verifying` task is excluded from `rd ready` and keeps downstream tasks blocked,
+the same as any other non-`completed` state.
 
 The `--assignee` flag is required when starting a task. It records who claimed the task,
 preventing two agents/users from working on the same thing. Use `release` to unclaim a task
@@ -182,8 +201,10 @@ rd clean --force             # Remove all goals regardless of status
 - Only `pending` tasks can be started normally; `blocked` tasks can be started with `--force`.
 - Only `pending` tasks can be deleted. Deleting a task removes it from any downstream
   `blocked_by` lists — tasks that were waiting only on the deleted task become `pending`.
-- Only `in_progress` tasks can be completed.
+- Only `in_progress` tasks can be completed or submitted for review.
 - Only `in_progress` or `verifying` tasks can be failed.
+- Only `verifying` tasks can be accepted (same effects as `complete`) or rejected (back to
+  `in_progress` for rework, with the reviewer's reason recorded as an attempt-numbered comment).
 - Only `failed` tasks can be retried. Retrying moves the task to `pending` (not `in_progress`)
   and clears `started_at` — call `start` again to resume work. The prior result is recorded as
   a comment tagged with the attempt number, then cleared.

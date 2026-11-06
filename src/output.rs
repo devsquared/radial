@@ -600,6 +600,56 @@ pub fn task_retry(task: &Task, opts: &RenderOptions) -> Result<()> {
     })
 }
 
+pub fn task_submitted(task: &Task, opts: &RenderOptions) -> Result<()> {
+    json_or(task, opts, |w| {
+        writeln!(
+            w,
+            "{} {}",
+            style("Submitted task for review:").yellow(),
+            style(task.id()).cyan().bold()
+        )?;
+        writeln!(w, "  {}", truncate(task.description(), 80))?;
+        Ok(())
+    })
+}
+
+pub fn task_accepted(result: &CompleteResult, opts: &RenderOptions) -> Result<()> {
+    json_or(result, opts, |w| {
+        writeln!(
+            w,
+            "{} {}",
+            style("Accepted task:").green(),
+            style(result.task.id()).cyan().bold()
+        )?;
+        if let Some(res) = result.task.result() {
+            writeln!(w, "  {}", truncate(res.summary(), 80))?;
+        }
+
+        if !result.unblocked_task_ids.is_empty() {
+            writeln!(w)?;
+            writeln!(w, "{}", style("Unblocked tasks:").yellow())?;
+            for id in &result.unblocked_task_ids {
+                writeln!(w, "  - {}", style(id).cyan())?;
+            }
+        }
+        Ok(())
+    })
+}
+
+pub fn task_rejected(task: &Task, opts: &RenderOptions) -> Result<()> {
+    json_or(task, opts, |w| {
+        writeln!(
+            w,
+            "{} {}",
+            style("Rejected task:").red(),
+            style(task.id()).cyan().bold()
+        )?;
+        writeln!(w, "  {}", truncate(task.description(), 80))?;
+        writeln!(w, "  Retry count: {}", task.metrics().retry_count())?;
+        Ok(())
+    })
+}
+
 pub fn task_deleted(task: &Task, opts: &RenderOptions) -> Result<()> {
     json_or(task, opts, |w| {
         writeln!(

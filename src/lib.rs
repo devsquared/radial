@@ -268,6 +268,33 @@ fn run_task(task_cmd: TaskCommands, db: &mut Database) -> Result<()> {
             let task = ops::task::retry(&task_id, db)?;
             output::task_retry(&task, &RenderOptions::new().json(json))
         }
+        TaskCommands::Submit { task_id, json } => {
+            let task_id = db.resolve_any_task(&task_id).map_err(|e| anyhow!("{e}"))?;
+            let task = ops::task::submit(&task_id, db)?;
+            output::task_submitted(&task, &RenderOptions::new().json(json))
+        }
+        TaskCommands::Accept {
+            task_id,
+            result,
+            artifacts,
+            tokens,
+            elapsed,
+            json,
+        } => {
+            let task_id = db.resolve_any_task(&task_id).map_err(|e| anyhow!("{e}"))?;
+            let complete_result =
+                ops::task::accept(&task_id, result, artifacts, tokens, elapsed, db)?;
+            output::task_accepted(&complete_result, &RenderOptions::new().json(json))
+        }
+        TaskCommands::Reject {
+            task_id,
+            reason,
+            json,
+        } => {
+            let task_id = db.resolve_any_task(&task_id).map_err(|e| anyhow!("{e}"))?;
+            let task = ops::task::reject(&task_id, reason, db)?;
+            output::task_rejected(&task, &RenderOptions::new().json(json))
+        }
         TaskCommands::Release {
             task_id,
             stale,

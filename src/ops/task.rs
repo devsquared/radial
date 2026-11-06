@@ -417,7 +417,53 @@ pub fn complete(
         ));
     }
 
-    let goal_id = task.goal_id().clone();
+    let outcome = build_outcome_and_metrics(task, result_summary, artifacts, tokens, elapsed);
+    finish_completion(task_id, outcome.0, outcome.1, db)
+}
+
+/// Accept a task under review, completing it the same way `complete` does
+/// from `InProgress` — but from `Verifying`, as the other half of the
+/// `submit`/`accept`/`reject` review flow.
+pub fn accept(
+    task_id: &TaskId,
+    result_summary: String,
+    artifacts: Option<Vec<String>>,
+    tokens: Option<i64>,
+    elapsed: Option<i64>,
+    db: &mut Database,
+) -> Result<CompleteResult> {
+    let task = db.get_task(task_id);
+
+    if task.is_none() {
+        return Err(task_not_found_err(task_id, db));
+    }
+
+    let task = task.unwrap();
+
+    if db.has_subtasks(task_id) {
+        return Err(anyhow!(
+            "Task {task_id} has subtasks and cannot be accepted directly. Accept its subtasks instead."
+        ));
+    }
+
+    if task.state() != TaskState::Verifying {
+        return Err(anyhow!(
+            "Task must be in 'verifying' state to accept. Current state: {}",
+            task.state().as_ref()
+        ));
+    }
+
+    let outcome = build_outcome_and_metrics(task, result_summary, artifacts, tokens, elapsed);
+    finish_completion(task_id, outcome.0, outcome.1, db)
+}
+
+fn build_outcome_and_metrics(
+    task: &Task,
+    result_summary: String,
+    artifacts: Option<Vec<String>>,
+    tokens: Option<i64>,
+    elapsed: Option<i64>,
+) -> (Outcome, TaskMetrics) {
     let retry_count = task.metrics().retry_count();
     let started_at = task.started_at().unwrap_or_else(|| task.updated_at());
     let artifacts_list = artifacts.unwrap_or_default();
@@ -433,7 +479,17 @@ pub fn complete(
             .unwrap_or(i64::MAX)
     });
     let metrics = TaskMetrics::new(tokens.unwrap_or(0), elapsed_ms, retry_count);
+    (outcome, metrics)
+}
 
+/// Shared tail of `complete`/`accept`: transitions the task to `Completed`,
+/// unblocks downstream tasks, syncs the parent, and refreshes goal state.
+fn finish_completion(
+    task_id: &TaskId,
+    outcome: Outcome,
+    metrics: TaskMetrics,
+    db: &mut Database,
+) -> Result<CompleteResult> {
     let task = db.get_task_mut(task_id).unwrap();
     if !task.complete(outcome, metrics) {
         return Err(anyhow!(
@@ -442,6 +498,7 @@ pub fn complete(
     }
     let completed_task = task.clone();
     db.save_task(&completed_task)?;
+    let goal_id = completed_task.goal_id().clone();
     let parent_id = completed_task.parent_id().cloned();
 
     // Snapshot blocked tasks in this goal for unblocking checks
@@ -641,6 +698,88 @@ pub fn retry(task_id: &TaskId, db: &mut Database) -> Result<Task> {
     db.refresh_goal_metrics(retried_task.goal_id())?;
 
     Ok(retried_task)
+}
+
+/// Submit an in-progress task for review: moves it to `Verifying` with no
+/// result recorded yet. The task stays excluded from `rd ready` and keeps
+/// downstream tasks blocked until a reviewer `accept`s it with `complete`'s
+/// usual effects, or `reject`s it back to `InProgress` for rework.
+pub fn submit(task_id: &TaskId, db: &mut Database) -> Result<Task> {
+    let task = db.get_task(task_id);
+
+    if task.is_none() {
+        return Err(task_not_found_err(task_id, db));
+    }
+
+    let task = task.unwrap();
+
+    if db.has_subtasks(task_id) {
+        return Err(anyhow!(
+            "Task {task_id} has subtasks and cannot be submitted directly. Submit its subtasks instead."
+        ));
+    }
+
+    if task.state() != TaskState::InProgress {
+        return Err(anyhow!(
+            "Task must be in 'in_progress' state to submit. Current state: {}",
+            task.state().as_ref()
+        ));
+    }
+
+    let task = db.get_task_mut(task_id).unwrap();
+    if !task.transition_from_any(&[TaskState::InProgress], TaskState::Verifying) {
+        return Err(anyhow!("Failed to submit task: state may have changed"));
+    }
+    let submitted_task = task.clone();
+    db.save_task(&submitted_task)?;
+
+    if let Some(pid) = submitted_task.parent_id() {
+        db.sync_parent_state(pid)?;
+    }
+    db.refresh_goal_metrics(submitted_task.goal_id())?;
+
+    Ok(submitted_task)
+}
+
+/// Reject a task under review: sends it back to `InProgress` for rework
+/// (the assignee stays claimed, unlike `retry`, which requires a fresh
+/// `start`), increments the retry counter, and records the reviewer's
+/// reason as an attempt-numbered comment.
+pub fn reject(task_id: &TaskId, reason: String, db: &mut Database) -> Result<Task> {
+    let task = db.get_task(task_id);
+
+    if task.is_none() {
+        return Err(task_not_found_err(task_id, db));
+    }
+
+    let task = task.unwrap();
+
+    if db.has_subtasks(task_id) {
+        return Err(anyhow!(
+            "Task {task_id} has subtasks and cannot be rejected directly. Reject its subtasks instead."
+        ));
+    }
+
+    if task.state() != TaskState::Verifying {
+        return Err(anyhow!(
+            "Task must be in 'verifying' state to reject. Current state: {}",
+            task.state().as_ref()
+        ));
+    }
+
+    let task = db.get_task_mut(task_id).unwrap();
+    if !task.reject(&reason) {
+        return Err(anyhow!("Failed to reject task: state may have changed"));
+    }
+    let rejected_task = task.clone();
+    db.save_task(&rejected_task)?;
+
+    if let Some(pid) = rejected_task.parent_id() {
+        db.sync_parent_state(pid)?;
+    }
+    db.refresh_goal_metrics(rejected_task.goal_id())?;
+
+    Ok(rejected_task)
 }
 
 /// Clear a task's assignee, returning it to `Pending`.
