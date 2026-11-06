@@ -105,6 +105,21 @@ fn parse_blocked_by(raw: Option<Vec<String>>, db: &Database) -> Result<Option<Ve
     Ok(Some(ids?))
 }
 
+/// Parses repeated `--tag`/`--tag-filter key=value` strings into a map.
+fn parse_tags(raw: Vec<String>) -> Result<std::collections::BTreeMap<String, String>> {
+    raw.into_iter()
+        .map(|s| {
+            let (key, value) = s
+                .split_once('=')
+                .ok_or_else(|| anyhow!("Invalid tag '{s}': expected key=value"))?;
+            if key.is_empty() {
+                return Err(anyhow!("Invalid tag '{s}': key cannot be empty"));
+            }
+            Ok((key.to_string(), value.to_string()))
+        })
+        .collect()
+}
+
 fn ensure_initialized_for_write() -> Result<(Database, DbLock)> {
     let radial_dir = get_radial_path()
         .ok_or_else(|| anyhow!("Radial not initialized. Run 'radial init' first."))?;
@@ -149,8 +164,12 @@ fn resolve_goal_or_default(goal_id: Option<&str>, db: &Database) -> Result<GoalI
 
 fn run_goal(goal_cmd: GoalCommands, db: &mut Database) -> Result<()> {
     match goal_cmd {
-        GoalCommands::Create { description, json } => {
-            let goal = ops::goal::create(description, db)?;
+        GoalCommands::Create {
+            description,
+            tag,
+            json,
+        } => {
+            let goal = ops::goal::create(description, parse_tags(tag)?, db)?;
             output::goal_created(&goal, &RenderOptions::new().json(json))
         }
         GoalCommands::List { json } => {
@@ -181,6 +200,7 @@ fn run_task(task_cmd: TaskCommands, db: &mut Database) -> Result<()> {
             produces,
             verify,
             blocked_by,
+            tag,
             json,
         } => {
             let goal_id = db.resolve_any_goal(&goal_id).map_err(|e| anyhow!("{e}"))?;
@@ -197,6 +217,7 @@ fn run_task(task_cmd: TaskCommands, db: &mut Database) -> Result<()> {
                 produces,
                 verify,
                 parse_blocked_by(blocked_by, db)?,
+                parse_tags(tag)?,
                 db,
             )?;
             output::task_created(&task, &RenderOptions::new().json(json))
@@ -207,10 +228,17 @@ fn run_task(task_cmd: TaskCommands, db: &mut Database) -> Result<()> {
             json,
             verbose,
             assignee,
+            tag_filter,
             full,
         } => {
             let goal_id = resolve_goal_or_default(goal_id.as_deref(), db)?;
-            let tasks = ops::task::list(&goal_id, priority.as_ref(), assignee.as_deref(), db)?;
+            let tasks = ops::task::list(
+                &goal_id,
+                priority.as_ref(),
+                assignee.as_deref(),
+                &parse_tags(tag_filter)?,
+                db,
+            )?;
             let goal = db
                 .get_goal(&goal_id)
                 .ok_or_else(|| anyhow!("Goal not found: {goal_id}"))?;
@@ -379,12 +407,13 @@ fn run(cli: Cli) -> Result<()> {
             json,
             full,
             archived,
+            tag_filter,
         } => {
             let (db, _guard) = ensure_initialized_for_read()?;
             let results = if archived {
                 ops::list::run_archived(&db)?
             } else {
-                ops::list::run(&db)?
+                ops::list::run(&parse_tags(tag_filter)?, &db)?
             };
             output::list(&results, &RenderOptions::new().json(json).full(full))
         }
@@ -398,10 +427,12 @@ fn run(cli: Cli) -> Result<()> {
                 EditCommands::Goal {
                     goal_id,
                     description,
+                    tag,
                     json,
                 } => {
                     let goal_id = db.resolve_any_goal(&goal_id).map_err(|e| anyhow!("{e}"))?;
-                    let goal = ops::edit::goal(&goal_id, description, &mut db)?;
+                    let tags = (!tag.is_empty()).then(|| parse_tags(tag)).transpose()?;
+                    let goal = ops::edit::goal(&goal_id, description, tags, &mut db)?;
                     output::goal_edited(&goal, &RenderOptions::new().json(json))
                 }
                 EditCommands::Task {
@@ -415,6 +446,7 @@ fn run(cli: Cli) -> Result<()> {
                     remove_blocked_by,
                     set_blocked_by,
                     blocked_by,
+                    tag,
                     json,
                 } => {
                     if blocked_by.is_some() {
@@ -423,6 +455,7 @@ fn run(cli: Cli) -> Result<()> {
                         );
                     }
                     let task_id = db.resolve_any_task(&task_id).map_err(|e| anyhow!("{e}"))?;
+                    let tags = (!tag.is_empty()).then(|| parse_tags(tag)).transpose()?;
                     let task = ops::edit::task(
                         &task_id,
                         description,
@@ -433,6 +466,7 @@ fn run(cli: Cli) -> Result<()> {
                         parse_blocked_by(add_blocked_by, &db)?,
                         parse_blocked_by(remove_blocked_by, &db)?,
                         parse_blocked_by(set_blocked_by.or(blocked_by), &db)?,
+                        tags,
                         &mut db,
                     )?;
                     output::task_edited(&task, &RenderOptions::new().json(json))
@@ -443,6 +477,7 @@ fn run(cli: Cli) -> Result<()> {
             goal,
             task,
             assignee,
+            tag_filter,
             json,
         } => {
             let (db, _guard) = ensure_initialized_for_read()?;
@@ -452,7 +487,7 @@ fn run(cli: Cli) -> Result<()> {
             let task = task
                 .map(|t| db.resolve_any_task(&t).map_err(|e| anyhow!("{e}")))
                 .transpose()?;
-            let result = ops::status::run(goal, task, assignee, &db)?;
+            let result = ops::status::run(goal, task, assignee, &parse_tags(tag_filter)?, &db)?;
             output::status(&result, &RenderOptions::new().json(json))
         }
         Commands::Show { id, json } => {
@@ -491,11 +526,13 @@ fn run(cli: Cli) -> Result<()> {
         Commands::Ready {
             goal_id,
             priority,
+            tag_filter,
             json,
         } => {
             let (db, _guard) = ensure_initialized_for_read()?;
             let goal_id = resolve_goal_or_default(goal_id.as_deref(), &db)?;
-            let ready = ops::ready::run(&goal_id, priority.as_ref(), &db)?;
+            let ready =
+                ops::ready::run(&goal_id, priority.as_ref(), &parse_tags(tag_filter)?, &db)?;
             let goal = db
                 .get_goal(&goal_id)
                 .ok_or_else(|| anyhow!("Goal not found: {goal_id}"))?;

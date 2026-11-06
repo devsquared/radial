@@ -1,3 +1,5 @@
+use std::collections::BTreeMap;
+
 use anyhow::{Result, anyhow};
 use serde::Serialize;
 
@@ -5,6 +7,7 @@ use crate::db::Database;
 use crate::id::GoalId;
 use crate::id::TaskId;
 use crate::models::{Goal, Metrics, Task};
+use crate::ops::task::tags_matching;
 
 /// A single goal with its tasks and aggregate metrics.
 #[derive(Debug, Serialize)]
@@ -70,6 +73,7 @@ pub fn run(
     goal_id: Option<GoalId>,
     task_id: Option<TaskId>,
     assignee: Option<String>,
+    tag_filter: &BTreeMap<String, String>,
     db: &Database,
 ) -> Result<StatusResult> {
     if let Some(tid) = task_id {
@@ -77,7 +81,7 @@ pub fn run(
     }
 
     if let Some(gid) = goal_id {
-        return get_goal(&gid, assignee.as_deref(), db).map(StatusResult::Goal);
+        return get_goal(&gid, assignee.as_deref(), tag_filter, db).map(StatusResult::Goal);
     }
 
     Ok(StatusResult::AllGoals(get_all_goals(db)))
@@ -89,7 +93,12 @@ fn get_task(task_id: &TaskId, db: &Database) -> Result<Task> {
         .ok_or_else(|| anyhow!("Task not found: {task_id}"))
 }
 
-fn get_goal(goal_id: &GoalId, assignee: Option<&str>, db: &Database) -> Result<GoalStatus> {
+fn get_goal(
+    goal_id: &GoalId,
+    assignee: Option<&str>,
+    tag_filter: &BTreeMap<String, String>,
+    db: &Database,
+) -> Result<GoalStatus> {
     let goal = db
         .get_goal(goal_id)
         .ok_or_else(|| anyhow!("Goal not found: {goal_id}"))?
@@ -99,6 +108,7 @@ fn get_goal(goal_id: &GoalId, assignee: Option<&str>, db: &Database) -> Result<G
         .list_tasks(goal_id)
         .into_iter()
         .filter(|t| assignee.is_none_or(|a| t.assignee() == Some(a)))
+        .filter(|t| tags_matching(t, tag_filter))
         .cloned()
         .collect();
     let metrics = db.compute_goal_metrics(goal_id);

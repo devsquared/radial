@@ -43,6 +43,10 @@ pub enum Commands {
         /// Show archived goals instead of active goals
         #[arg(long)]
         archived: bool,
+
+        /// Only show tasks with this tag (key=value, repeatable; all must match)
+        #[arg(long = "tag-filter")]
+        tag_filter: Vec<String>,
     },
 
     /// Manage tasks
@@ -106,6 +110,10 @@ pub enum Commands {
         #[arg(long)]
         assignee: Option<String>,
 
+        /// Only show tasks with this tag (key=value, repeatable; all must match)
+        #[arg(long = "tag-filter")]
+        tag_filter: Vec<String>,
+
         /// Output as JSON
         #[arg(long)]
         json: bool,
@@ -120,6 +128,10 @@ pub enum Commands {
         /// Filter by priority level (p0, p1, p2, p3)
         #[arg(long)]
         priority: Option<Priority>,
+
+        /// Only show tasks with this tag (key=value, repeatable; all must match)
+        #[arg(long = "tag-filter")]
+        tag_filter: Vec<String>,
 
         /// Output as JSON
         #[arg(long)]
@@ -153,6 +165,10 @@ pub enum GoalCommands {
     Create {
         /// The goal description
         description: String,
+
+        /// Set a tag on the goal (key=value, repeatable)
+        #[arg(long = "tag")]
+        tag: Vec<String>,
 
         /// Output as JSON
         #[arg(long)]
@@ -215,6 +231,10 @@ pub enum TaskCommands {
         #[arg(long, value_delimiter = ',', num_args = 1..)]
         blocked_by: Option<Vec<String>>,
 
+        /// Set a tag on the task (key=value, repeatable)
+        #[arg(long = "tag")]
+        tag: Vec<String>,
+
         /// Output as JSON
         #[arg(long)]
         json: bool,
@@ -241,6 +261,10 @@ pub enum TaskCommands {
         /// Filter tasks by assignee
         #[arg(long)]
         assignee: Option<String>,
+
+        /// Only show tasks with this tag (key=value, repeatable; all must match)
+        #[arg(long = "tag-filter")]
+        tag_filter: Vec<String>,
 
         /// Show full descriptions without truncating
         #[arg(long)]
@@ -482,6 +506,10 @@ pub enum EditCommands {
         #[arg(long)]
         description: String,
 
+        /// Set a tag on the goal (key=value, repeatable)
+        #[arg(long = "tag")]
+        tag: Vec<String>,
+
         /// Output as JSON
         #[arg(long)]
         json: bool,
@@ -527,6 +555,10 @@ pub enum EditCommands {
         /// Deprecated: alias for --set-blocked-by, kept for one release
         #[arg(long, value_delimiter = ',', num_args = 1.., hide = true)]
         blocked_by: Option<Vec<String>>,
+
+        /// Set a tag on the task (key=value, repeatable)
+        #[arg(long = "tag")]
+        tag: Vec<String>,
 
         /// Output as JSON
         #[arg(long)]
