@@ -2923,7 +2923,7 @@ fn test_shell_completions() {
     let err = env
         .run(&["completions", "not-a-shell"])
         .expect_err("Expected invalid shell to fail");
-    assert!(!err.is_empty());
+    assert_ne!(err, "");
 }
 
 #[test]
