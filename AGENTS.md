@@ -70,6 +70,11 @@ Do not append "Co-Authored-By: <model name>" or any other Claude/AI attribution
 lines (session links included) to commit messages or pull request descriptions
 in this repository.
 
+Before pushing, check the commit(s) being pushed (`git log @{u}.. --format=%B` once
+a remote is tracked, or `git log origin/main..HEAD --format=%B` otherwise) for any
+such attribution line that crept back in. If one is found, amend it out (rewording
+the message, not just deleting the line in isolation) before the push goes out.
+
 ## Dependencies
 
 - `clap` (derive) — CLI parsing
