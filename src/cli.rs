@@ -327,7 +327,7 @@ pub enum TaskCommands {
         json: bool,
     },
 
-    /// Retry a failed task
+    /// Retry a failed task (returns it to `pending`; run `start` again to resume work)
     Retry {
         /// The task ID to retry
         task_id: String,

@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 use strum::{AsRefStr, EnumString};
 
 use super::{Comment, Contract, Outcome};
-use crate::id::{GoalId, TaskId};
+use crate::id::{GoalId, TaskId, generate_id};
 
 /// A task's priority, from most (`P0`) to least (`P3`) urgent.
 #[derive(
@@ -371,15 +371,24 @@ impl Task {
         true
     }
 
+    /// Retry a failed task: moves it back to `Pending` (not `InProgress` —
+    /// the caller needs an explicit `start` to resume work), records the
+    /// prior result as a comment tagged with the attempt number, and clears
+    /// `result` so the next attempt starts clean.
     pub(crate) fn retry(&mut self) -> bool {
         if self.state != TaskState::Failed {
             return false;
         }
-        self.state = TaskState::InProgress;
         self.metrics.retry_count += 1;
-        let now = Timestamp::now();
-        self.updated_at = now;
-        self.started_at = Some(now);
+        if let Some(prior) = self.result.take() {
+            let attempt = self.metrics.retry_count;
+            let text = format!("Attempt {attempt} failed: {}", prior.summary());
+            self.comments
+                .push(Comment::new(generate_id(), text, Timestamp::now()));
+        }
+        self.state = TaskState::Pending;
+        self.started_at = None;
+        self.updated_at = Timestamp::now();
         true
     }
 
@@ -554,14 +563,15 @@ mod tests {
 
     // -- retry --
 
-    // Retrying a failed task should move it back to InProgress and
-    // bump the retry counter.
+    // Retrying a failed task should move it back to Pending (not InProgress
+    // — the caller needs an explicit `start` to resume work) and bump the
+    // retry counter.
     #[rstest]
     fn retry_increments_and_transitions(mut task: Task) {
         task.state = TaskState::Failed;
         task.metrics.retry_count = 2;
         assert!(task.retry());
-        assert_eq!(task.state, TaskState::InProgress);
+        assert_eq!(task.state, TaskState::Pending);
         assert_eq!(task.metrics.retry_count, 3);
     }
 
@@ -575,6 +585,33 @@ mod tests {
         task.state = state;
         assert!(!task.retry());
         assert_eq!(task.state, state);
+    }
+
+    // Retrying should move the prior failure result into a comment tagged
+    // with the attempt number, and clear `result`.
+    #[rstest]
+    fn retry_records_prior_result_as_comment_and_clears_it(mut task: Task) {
+        task.state = TaskState::Failed;
+        task.result = Some(Outcome::new(
+            "timed out calling upstream".to_string(),
+            vec![],
+        ));
+        assert!(task.retry());
+        assert!(task.result.is_none());
+        assert_eq!(task.comments.len(), 1);
+        assert_eq!(
+            task.comments[0].text(),
+            "Attempt 1 failed: timed out calling upstream"
+        );
+    }
+
+    // Retrying with no prior result (e.g. a bare `fail` with no --reason)
+    // should not add a comment.
+    #[rstest]
+    fn retry_without_prior_result_adds_no_comment(mut task: Task) {
+        task.state = TaskState::Failed;
+        assert!(task.retry());
+        assert!(task.comments.is_empty());
     }
 
     // -- cancel --
@@ -708,13 +745,14 @@ mod tests {
         assert!(task.started_at.is_none());
     }
 
-    // Retrying a failed task should set started_at.
+    // Retrying a failed task should clear started_at — it lands in Pending,
+    // not InProgress, so the next `start` call sets it fresh.
     #[rstest]
-    fn retry_sets_started_at(mut task: Task) {
+    fn retry_clears_started_at(mut task: Task) {
         task.state = TaskState::Failed;
-        assert!(task.started_at.is_none());
+        task.started_at = Some(Timestamp::now());
         task.retry();
-        assert!(task.started_at.is_some());
+        assert!(task.started_at.is_none());
     }
 
     // Releasing a task should clear started_at.

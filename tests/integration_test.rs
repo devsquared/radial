@@ -868,7 +868,7 @@ fn test_json_output_edit_and_task_lifecycle_mutations() {
         .run(&["task", "retry", &task_id, "--json"])
         .expect("Retry task --json failed");
     let retried: Value = serde_json::from_str(&output).expect("Should be valid JSON");
-    assert_eq!(retried["state"], "inprogress");
+    assert_eq!(retried["state"], "pending");
 
     let output = env
         .run(&["task", "release", &task_id, "--json"])
