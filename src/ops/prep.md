@@ -128,7 +128,9 @@ Edit goals or tasks after creation.
 rd edit goal <goal_id> --description "Updated description"
 rd edit task <task_id> --description "New description"
 rd edit task <task_id> --receives "..." --produces "..." --verify "..."
-rd edit task <task_id> --blocked-by task_abc,task_def
+rd edit task <task_id> --add-blocked-by task_abc       # add a dependency
+rd edit task <task_id> --remove-blocked-by task_abc     # remove a dependency
+rd edit task <task_id> --set-blocked-by task_abc,task_def  # replace the whole list
 ```
 
 ### Viewing & Status
@@ -173,6 +175,10 @@ rd clean --force             # Remove all goals regardless of status
   complete. If a blocker is already completed when the task is created, it is filtered out and
   does not block the new task.
 - `--blocked-by` accepts task IDs as comma-separated or space-separated values.
+- `rd edit task --add-blocked-by`/`--remove-blocked-by`/`--set-blocked-by` recompute the task's
+  `pending`/`blocked` state from the resulting dependency list, the same way `task create` does.
+  `--set-blocked-by` replaces the whole list and cannot be combined with `--add-blocked-by` or
+  `--remove-blocked-by`.
 - Only `pending` tasks can be started normally; `blocked` tasks can be started with `--force`.
 - Only `pending` tasks can be deleted. Deleting a task removes it from any downstream
   `blocked_by` lists — tasks that were waiting only on the deleted task become `pending`.

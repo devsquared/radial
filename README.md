@@ -145,7 +145,7 @@ walkthrough aimed at agents. Almost every command also accepts `--json` for mach
 | Command | Description |
 |---------|-------------|
 | `rd edit goal <goal-id> --description <text>` | Update a goal's description |
-| `rd edit task <task-id> [--description] [--priority] [--receives --produces --verify] [--blocked-by]` | Update a task's description, priority, contract, and/or dependencies |
+| `rd edit task <task-id> [--description] [--priority] [--receives --produces --verify] [--add-blocked-by \| --remove-blocked-by \| --set-blocked-by]` | Update a task's description, priority, contract, and/or dependencies |
 
 #### Viewing and status
 
