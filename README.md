@@ -203,12 +203,24 @@ rd edit task <task-id> \
 ### Subtasks
 
 A task can have subtasks by passing `--parent` at creation. Subtasks are one level deep — a subtask
-cannot itself have subtasks — and follow the same lifecycle as any other task. A parent task can't be
-started, completed, failed, retried, submitted, accepted, rejected, or released directly; work happens on its subtasks, and the
-parent transitions to `completed` automatically once all of them are resolved.
+cannot itself have subtasks — and follow the same lifecycle as any other task. A subtask also inherits
+any unresolved blockers from its parent's own `blocked_by`, on top of its own — this is computed when
+`ready`/`start` check blocking, not persisted onto the subtask.
+
+A parent task can't be started, completed, failed, retried, submitted, accepted, rejected, released, or
+deleted directly by default; work happens on its subtasks, and the parent transitions to `completed`
+automatically once all of them are resolved. Every one of those operations except `start` and `delete`
+accepts `--force` to run it on the parent directly anyway, recording the override as a comment on it.
+(`start` has no equivalent — a parent isn't itself a unit of work. `delete` has no equivalent either:
+cascading the delete to its subtasks is a separate decision this doesn't make; delete the subtasks
+first.) Note that a `--force`d state is derived, not fixed: the next `sync_parent_state` triggered by
+one of its subtasks changing can recompute and silently overwrite it.
 
 ```bash
 rd task create <goal-id> "Write unit tests" --parent <parent-task-id>
+
+# A parent task with subtasks still open can be forced through directly:
+rd task cancel <parent-task-id> --force
 ```
 
 ### Display refs

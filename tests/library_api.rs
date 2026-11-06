@@ -49,6 +49,7 @@ fn drives_a_goal_through_create_start_complete_via_ops() {
         None,
         None,
         None,
+        false,
         &mut db,
     )
     .expect("failed to complete task");
@@ -91,8 +92,16 @@ fn derives_elapsed_ms_from_started_at_when_not_supplied() {
 
     std::thread::sleep(std::time::Duration::from_millis(20));
 
-    let result = ops::task::complete(task.id(), "Finished".to_string(), None, None, None, &mut db)
-        .expect("failed to complete task");
+    let result = ops::task::complete(
+        task.id(),
+        "Finished".to_string(),
+        None,
+        None,
+        None,
+        false,
+        &mut db,
+    )
+    .expect("failed to complete task");
 
     assert!(
         result.task.metrics().elapsed_ms() >= 20,
@@ -134,6 +143,7 @@ fn explicit_elapsed_overrides_derivation_from_started_at() {
         None,
         None,
         Some(1234),
+        false,
         &mut db,
     )
     .expect("failed to complete task");

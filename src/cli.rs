@@ -286,6 +286,10 @@ pub enum TaskCommands {
         #[arg(long)]
         elapsed: Option<i64>,
 
+        /// Complete this task directly even though it has open subtasks
+        #[arg(long)]
+        force: bool,
+
         /// Output as JSON
         #[arg(long)]
         json: bool,
@@ -303,6 +307,10 @@ pub enum TaskCommands {
         /// Compact the task immediately using the reason as its summary
         #[arg(long, requires = "reason")]
         compact: bool,
+
+        /// Fail this task directly even though it has open subtasks
+        #[arg(long)]
+        force: bool,
 
         /// Output as JSON
         #[arg(long)]
@@ -322,6 +330,10 @@ pub enum TaskCommands {
         #[arg(long)]
         cascade: bool,
 
+        /// Cancel this task directly even though it has open subtasks
+        #[arg(long)]
+        force: bool,
+
         /// Output as JSON
         #[arg(long)]
         json: bool,
@@ -332,6 +344,10 @@ pub enum TaskCommands {
         /// The task ID to retry
         task_id: String,
 
+        /// Retry this task directly even though it has open subtasks
+        #[arg(long)]
+        force: bool,
+
         /// Output as JSON
         #[arg(long)]
         json: bool,
@@ -341,6 +357,10 @@ pub enum TaskCommands {
     Submit {
         /// The task ID to submit
         task_id: String,
+
+        /// Submit this task directly even though it has open subtasks
+        #[arg(long)]
+        force: bool,
 
         /// Output as JSON
         #[arg(long)]
@@ -368,6 +388,10 @@ pub enum TaskCommands {
         #[arg(long)]
         elapsed: Option<i64>,
 
+        /// Accept this task directly even though it has open subtasks
+        #[arg(long)]
+        force: bool,
+
         /// Output as JSON
         #[arg(long)]
         json: bool,
@@ -381,6 +405,10 @@ pub enum TaskCommands {
         /// Reason the task was rejected
         #[arg(long)]
         reason: String,
+
+        /// Reject this task directly even though it has open subtasks
+        #[arg(long)]
+        force: bool,
 
         /// Output as JSON
         #[arg(long)]
@@ -399,6 +427,10 @@ pub enum TaskCommands {
         /// Release all in-progress tasks regardless of duration
         #[arg(long, conflicts_with_all = ["task_id", "stale"])]
         all_in_progress: bool,
+
+        /// Release this task directly even though it has open subtasks
+        #[arg(long)]
+        force: bool,
 
         /// Output as JSON
         #[arg(long)]

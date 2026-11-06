@@ -73,8 +73,12 @@ Rules for subtasks:
 
 - Subtasks cannot themselves have subtasks (one level only).
 - Subtasks cannot be added to a completed or failed parent.
-- A parent task cannot be started, completed, failed, retried, submitted, accepted, rejected, or
-  released directly — work on its subtasks instead.
+- A subtask inherits any unresolved blockers from its parent's `blocked_by`, in addition to its own —
+  `ready` and `start` check this automatically, so you don't need to copy blockers down by hand.
+- A parent task cannot be started, completed, failed, retried, submitted, accepted, rejected,
+  released, or deleted directly by default — work on its subtasks instead. Every one of those except
+  `start` and `delete` accepts `--force` to run it on the parent directly anyway (recorded as a
+  comment on it); see `rd task <command> --help`.
 - The parent transitions to `completed` automatically when all subtasks complete.
 
 ### Task Lifecycle
