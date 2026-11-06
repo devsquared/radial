@@ -2981,3 +2981,124 @@ fn test_json_output_task_comment_and_comments() {
     let comments: Value = serde_json::from_str(&output).expect("Should be valid JSON");
     assert_eq!(comments["comments"][0]["text"], "a note");
 }
+
+/// Reads and parses a goal's persisted `goal.toml` directly off disk, bypassing
+/// `rd` entirely, to verify what is actually written rather than what a
+/// freshly recomputed read would show.
+fn read_persisted_goal_toml(env: &TestEnv, goal_id: &str) -> toml::Value {
+    let path = env.work_dir.join(".radial").join(goal_id).join("goal.toml");
+    let contents = std::fs::read_to_string(&path)
+        .unwrap_or_else(|e| panic!("failed to read {}: {e}", path.display()));
+    toml::from_str(&contents).expect("goal.toml should parse")
+}
+
+#[test]
+fn test_persisted_goal_metrics_stay_fresh_after_task_mutations() {
+    let env = TestEnv::new();
+    env.run(&["init"]).expect("Init failed");
+
+    let output = env
+        .run(&["goal", "create", "Metrics freshness test"])
+        .expect("Create goal failed");
+    let goal_id = output
+        .lines()
+        .find(|line| line.contains("Created goal:"))
+        .and_then(|line| line.split_whitespace().nth(2))
+        .unwrap()
+        .to_string();
+
+    let output = env
+        .run(&[
+            "task",
+            "create",
+            &goal_id,
+            "Do the thing",
+            "--receives",
+            "In",
+            "--produces",
+            "Out",
+            "--verify",
+            "Check",
+        ])
+        .expect("Create task failed");
+    let task_id = output
+        .lines()
+        .find(|line| line.contains("Created task:"))
+        .and_then(|line| line.split_whitespace().nth(2))
+        .unwrap()
+        .to_string();
+
+    // Right after creation, the persisted metrics already reflect the new task.
+    let persisted = read_persisted_goal_toml(&env, &goal_id);
+    assert_eq!(persisted["metrics"]["task_count"].as_integer(), Some(1));
+    assert_eq!(
+        persisted["metrics"]["tasks_completed"].as_integer(),
+        Some(0)
+    );
+
+    env.run(&["task", "start", &task_id, "--assignee", "test-agent"])
+        .expect("Start failed");
+    env.run(&["task", "complete", &task_id, "--result", "All done"])
+        .expect("Complete failed");
+
+    // The persisted field (not just the live recompute) must be refreshed by
+    // the completion, not stuck at its stale creation-time value.
+    let persisted = read_persisted_goal_toml(&env, &goal_id);
+    assert_eq!(persisted["metrics"]["task_count"].as_integer(), Some(1));
+    assert_eq!(
+        persisted["metrics"]["tasks_completed"].as_integer(),
+        Some(1)
+    );
+}
+
+#[test]
+fn test_show_and_status_goal_json_have_no_duplicate_metrics_key() {
+    let env = TestEnv::new();
+    env.run(&["init"]).expect("Init failed");
+
+    let output = env
+        .run(&["goal", "create", "Duplicate key test"])
+        .expect("Create goal failed");
+    let goal_id = output
+        .lines()
+        .find(|line| line.contains("Created goal:"))
+        .and_then(|line| line.split_whitespace().nth(2))
+        .unwrap()
+        .to_string();
+
+    env.run(&[
+        "task",
+        "create",
+        &goal_id,
+        "Task one",
+        "--receives",
+        "In",
+        "--produces",
+        "Out",
+        "--verify",
+        "Check",
+    ])
+    .expect("Create task failed");
+
+    for args in [
+        vec!["show", goal_id.as_str(), "--json"],
+        vec!["status", "--goal", goal_id.as_str(), "--json"],
+    ] {
+        let output = env.run(&args).expect("goal JSON command failed");
+
+        // serde_json's map silently drops one of two colliding keys, so a
+        // bug here would still parse "successfully" with the wrong value.
+        // Count raw occurrences of a *top-level* `metrics` key (pretty-printed
+        // with a 2-space indent) to catch the collision itself; the task's own
+        // unrelated `metrics` field is nested deeper and indented further.
+        assert_eq!(
+            output.matches("\n  \"metrics\": {").count(),
+            1,
+            "expected exactly one top-level `metrics` key in {args:?} output:\n{output}"
+        );
+
+        let parsed: Value = serde_json::from_str(&output).expect("Should be valid JSON");
+        assert_eq!(parsed["computed_metrics"]["task_count"], 1);
+        assert_eq!(parsed["metrics"]["task_count"], 1);
+    }
+}
