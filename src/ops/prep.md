@@ -89,7 +89,7 @@ rd task complete <task_id> --result "Done" --tokens 1500 --elapsed 30000
 rd task fail <task_id>                           # Mark as failed
 rd task fail <task_id> --reason "Why it failed" # Mark failed with reason
 rd task fail <task_id> --reason "..." --compact  # Compact immediately (requires --reason)
-rd task retry <task_id>                          # Retry a failed task
+rd task retry <task_id>                          # Retry a failed task (-> pending, not in_progress)
 rd task release <task_id>                        # Release claim, back to pending
 rd task release --stale 1h                       # Release tasks in progress > 1 hour
 rd task release --all-in-progress                # Release all in-progress tasks
@@ -184,7 +184,9 @@ rd clean --force             # Remove all goals regardless of status
   `blocked_by` lists — tasks that were waiting only on the deleted task become `pending`.
 - Only `in_progress` tasks can be completed.
 - Only `in_progress` or `verifying` tasks can be failed.
-- Only `failed` tasks can be retried.
+- Only `failed` tasks can be retried. Retrying moves the task to `pending` (not `in_progress`)
+  and clears `started_at` — call `start` again to resume work. The prior result is recorded as
+  a comment tagged with the attempt number, then cleared.
 - Completed tasks keep their full description, contract, and comments; compaction is opt-in.
 - Failed tasks with `retry_count >= 3` are auto-compacted on the failing call.
 

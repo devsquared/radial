@@ -602,8 +602,10 @@ pub fn fail(
     Ok(failed_task)
 }
 
-/// Retry a failed task, transitioning it back to `InProgress` and
-/// incrementing its retry count.
+/// Retry a failed task: moves it back to `Pending` (not `InProgress` — the
+/// caller needs an explicit `start` to resume work), increments its retry
+/// count, and records the prior result as a comment tagged with the attempt
+/// number.
 pub fn retry(task_id: &TaskId, db: &mut Database) -> Result<Task> {
     let task = db.get_task(task_id);
 

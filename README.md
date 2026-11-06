@@ -134,7 +134,7 @@ walkthrough aimed at agents. Almost every command also accepts `--json` for mach
 | `rd task complete <task-id> --result <summary> [--artifacts <paths>] [--tokens <n>] [--elapsed <ms>]` | Mark a task complete. If `--elapsed` is omitted, it's derived from how long the task was in progress |
 | `rd task fail <task-id> [--reason <text>] [--compact]` | Mark a task as failed |
 | `rd task cancel <task-id> [--reason <text>] [--cascade]` | Cancel a task that's no longer needed. `--cascade` also cancels its downstream dependents |
-| `rd task retry <task-id>` | Retry a failed task |
+| `rd task retry <task-id>` | Retry a failed task; moves it to `pending` (not `in_progress`) and records the prior result as a comment |
 | `rd task release <task-id>` | Release a claimed task back to `pending` |
 | `rd task release --stale <duration>` | Release tasks that have been in progress longer than `<duration>` (e.g. `1h`, `30m`) |
 | `rd task release --all-in-progress` | Release every in-progress task, regardless of duration |
