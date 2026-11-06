@@ -162,7 +162,7 @@ fn run_goal(goal_cmd: GoalCommands, db: &mut Database) -> Result<()> {
             reason,
             json,
         } => {
-            let goal_id = db.resolve_goal_id(&goal_id).map_err(|e| anyhow!("{e}"))?;
+            let goal_id = db.resolve_any_goal(&goal_id).map_err(|e| anyhow!("{e}"))?;
             let result = ops::goal::cancel(&goal_id, reason, "cli", db)?;
             output::goal_cancelled(&result, &RenderOptions::new().json(json))
         }
