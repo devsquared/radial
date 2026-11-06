@@ -113,7 +113,7 @@ walkthrough aimed at agents. Almost every command also accepts `--json` for mach
 
 | Command | Description |
 |---------|-------------|
-| `rd goal create <description>` | Create a new goal |
+| `rd goal create <description> [--tag key=value]` | Create a new goal, optionally with tags (`--tag` is repeatable) |
 | `rd goal list` | List all active (non-archived) goals |
 | `rd goal cancel <goal-id> [--reason <text>]` | Cancel a goal and every non-terminal task under it |
 
@@ -121,8 +121,8 @@ walkthrough aimed at agents. Almost every command also accepts `--json` for mach
 
 | Command | Description |
 |---------|-------------|
-| `rd task create <goal-id> <description> [--priority p0-p3] [--parent <task-id>] [--receives ... --produces ... --verify ...] [--blocked-by <ids>]` | Create a task, optionally as a subtask, with a contract and/or dependencies |
-| `rd task list [<goal-id>] [--priority] [--assignee] [--verbose] [--full]` | List tasks for a goal. The goal ID can be omitted if you have exactly one active goal |
+| `rd task create <goal-id> <description> [--priority p0-p3] [--parent <task-id>] [--receives ... --produces ... --verify ...] [--blocked-by <ids>] [--tag key=value]` | Create a task, optionally as a subtask, with a contract, dependencies, and/or tags (`--tag` is repeatable) |
+| `rd task list [<goal-id>] [--priority] [--assignee] [--tag-filter key=value] [--verbose] [--full]` | List tasks for a goal, optionally filtered by tag (`--tag-filter` is repeatable; all must match). The goal ID can be omitted if you have exactly one active goal |
 | `rd task comment <task-id> <text>` | Add a timestamped comment to a task |
 | `rd task comments <task-id>` | View all comments on a task, untruncated |
 
@@ -147,17 +147,17 @@ walkthrough aimed at agents. Almost every command also accepts `--json` for mach
 
 | Command | Description |
 |---------|-------------|
-| `rd edit goal <goal-id> --description <text>` | Update a goal's description |
-| `rd edit task <task-id> [--description] [--priority] [--receives --produces --verify] [--add-blocked-by \| --remove-blocked-by \| --set-blocked-by]` | Update a task's description, priority, contract, and/or dependencies |
+| `rd edit goal <goal-id> --description <text> [--tag key=value]` | Update a goal's description and/or upsert tags onto it (`--tag` is repeatable) |
+| `rd edit task <task-id> [--description] [--priority] [--receives --produces --verify] [--add-blocked-by \| --remove-blocked-by \| --set-blocked-by] [--tag key=value]` | Update a task's description, priority, contract, dependencies, and/or tags (`--tag` upserts, is repeatable) |
 
 #### Viewing and status
 
 | Command | Description |
 |---------|-------------|
-| `rd list [--full] [--archived]` (alias `rd ls`) | All goals and their tasks, in dependency order |
+| `rd list [--full] [--archived] [--tag-filter key=value]` (alias `rd ls`) | All goals and their tasks, in dependency order, optionally filtered by tag (`--tag-filter` is repeatable; all must match) |
 | `rd show <id>` | Full details of a goal or task; auto-detects which one `<id>` refers to |
-| `rd status [--goal <id>] [--task <id>] [--assignee <name>]` | Compact status overview, optionally scoped to one goal, one task, or one assignee |
-| `rd ready [<goal-id>] [--priority p0-p3]` | Tasks ready to start, sorted by priority. The goal ID can be omitted if you have exactly one active goal |
+| `rd status [--goal <id>] [--task <id>] [--assignee <name>] [--tag-filter key=value]` | Compact status overview, optionally scoped to one goal, one task, one assignee, and/or filtered by tag |
+| `rd ready [<goal-id>] [--priority p0-p3] [--tag-filter key=value]` | Tasks ready to start, sorted by priority, optionally filtered by tag. The goal ID can be omitted if you have exactly one active goal |
 
 #### Cleanup and archiving
 

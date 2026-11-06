@@ -1,3 +1,5 @@
+use std::collections::BTreeMap;
+
 use anyhow::{Result, anyhow};
 
 use crate::db::Database;
@@ -5,13 +7,21 @@ use crate::helpers::{detect_cycle, find_similar_id};
 use crate::id::{GoalId, TaskId};
 use crate::models::{Contract, Goal, Priority, Task, TaskState};
 
-/// Update a goal's description.
-pub fn goal(goal_id: &GoalId, description: String, db: &mut Database) -> Result<Goal> {
+/// Update a goal's description and/or upsert tags onto it.
+pub fn goal(
+    goal_id: &GoalId,
+    description: String,
+    tags: Option<BTreeMap<String, String>>,
+    db: &mut Database,
+) -> Result<Goal> {
     let goal = db
         .get_goal_mut(goal_id)
         .ok_or_else(|| anyhow!("Goal not found: {goal_id}"))?;
 
     goal.set_description(description);
+    if let Some(tags) = tags {
+        goal.merge_tags(tags);
+    }
     let goal = goal.clone();
     db.save_goal(&goal)?;
     Ok(goal)
@@ -40,6 +50,7 @@ pub fn task(
     add_blocked_by: Option<Vec<TaskId>>,
     remove_blocked_by: Option<Vec<TaskId>>,
     set_blocked_by: Option<Vec<TaskId>>,
+    tags: Option<BTreeMap<String, String>>,
     db: &mut Database,
 ) -> Result<Task> {
     if set_blocked_by.is_some() && (add_blocked_by.is_some() || remove_blocked_by.is_some()) {
@@ -164,6 +175,10 @@ pub fn task(
 
     if let Some(state) = new_state {
         task.set_blocked_state(state);
+    }
+
+    if let Some(tags) = tags {
+        task.merge_tags(tags);
     }
 
     let task = task.clone();

@@ -1,15 +1,19 @@
+use std::collections::BTreeMap;
+
 use anyhow::{Result, anyhow};
 
 use crate::db::Database;
 use crate::id::GoalId;
 use crate::models::{Priority, Task, TaskState};
+use crate::ops::task::tags_matching;
 
 /// List a goal's ready-to-start tasks: pending, with a contract, no
-/// subtasks, and (optionally) matching the given priority. Each task is
-/// paired with its parent task, if it has one.
+/// subtasks, and (optionally) matching the given priority and/or tags. Each
+/// task is paired with its parent task, if it has one.
 pub fn run(
     goal_id: &GoalId,
     priority: Option<&Priority>,
+    tag_filter: &BTreeMap<String, String>,
     db: &Database,
 ) -> Result<Vec<(Task, Option<Task>)>> {
     db.get_goal(goal_id)
@@ -24,6 +28,7 @@ pub fn run(
         // an unresolved blocker from its parent; state alone doesn't reflect that.
         .filter(|t| db.effective_blockers(t).is_empty())
         .filter(|t| priority.is_none_or(|p| t.priority() == *p))
+        .filter(|t| tags_matching(t, tag_filter))
         .map(|t| {
             let parent = t.parent_id().and_then(|pid| db.get_task(pid)).cloned();
             (t.clone(), parent)

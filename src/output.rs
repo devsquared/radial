@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::io::{self, Write};
 
 use anyhow::Result;
@@ -86,6 +86,14 @@ fn json_or<T: Serialize + ?Sized>(
     Ok(())
 }
 
+/// Formats tags as a comma-separated `key=value` list.
+fn format_tags(tags: &BTreeMap<String, String>) -> String {
+    tags.iter()
+        .map(|(k, v)| format!("{k}={v}"))
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
 /// Truncate a string to the first line, capping at `max` characters.
 fn truncate(s: &str, max: usize) -> String {
     let first_line = s.lines().next().unwrap_or(s);
@@ -107,6 +115,9 @@ pub fn goal_created(goal: &Goal, opts: &RenderOptions) -> Result<()> {
             style(goal.id()).cyan().bold()
         )?;
         writeln!(w, "  {}", truncate(goal.description(), 80))?;
+        if !goal.tags().is_empty() {
+            writeln!(w, "  Tags: {}", format_tags(goal.tags()))?;
+        }
         Ok(())
     })
 }
@@ -152,6 +163,9 @@ pub fn goal_edited(goal: &Goal, opts: &RenderOptions) -> Result<()> {
             style(goal.id()).cyan().bold()
         )?;
         writeln!(w, "  {}", truncate(goal.description(), 80))?;
+        if !goal.tags().is_empty() {
+            writeln!(w, "  Tags: {}", format_tags(goal.tags()))?;
+        }
         Ok(())
     })
 }
@@ -291,6 +305,9 @@ pub fn task_edited(task: &Task, opts: &RenderOptions) -> Result<()> {
             style(task.id()).cyan().bold()
         )?;
         writeln!(w, "  {}", truncate(task.description(), 80))?;
+        if !task.tags().is_empty() {
+            writeln!(w, "  Tags: {}", format_tags(task.tags()))?;
+        }
         Ok(())
     })
 }
@@ -308,6 +325,9 @@ pub fn task_created(task: &Task, opts: &RenderOptions) -> Result<()> {
         writeln!(w, "  {}", truncate(task.description(), 80))?;
         writeln!(w, "  State: {}", state_styled(task.state().as_ref()))?;
         writeln!(w, "  Priority: {}", task.priority().as_ref())?;
+        if !task.tags().is_empty() {
+            writeln!(w, "  Tags: {}", format_tags(task.tags()))?;
+        }
         if task.contract().is_none() {
             writeln!(
                 w,
@@ -855,6 +875,9 @@ fn show_compacted_task(task: &Task, w: &mut dyn Write) -> Result<()> {
     writeln!(w)?;
     field(w, "Priority", task.priority().as_ref())?;
     field(w, "Goal", task.goal_id().as_ref())?;
+    if !task.tags().is_empty() {
+        field(w, "Tags", &format_tags(task.tags()))?;
+    }
     field(w, "Created", &task.created_at().to_string())?;
     field(w, "Updated", &task.updated_at().to_string())?;
     Ok(())
@@ -888,6 +911,9 @@ fn show_task(task: &Task, opts: &RenderOptions) -> Result<()> {
         }
         if let Some(assignee) = task.assignee() {
             field(w, "Assignee", assignee)?;
+        }
+        if !task.tags().is_empty() {
+            field(w, "Tags", &format_tags(task.tags()))?;
         }
         field(w, "Created", &task.created_at().to_string())?;
         field(w, "Updated", &task.updated_at().to_string())?;
@@ -997,6 +1023,9 @@ fn show_goal(
         field(w, "Updated", &goal.updated_at().to_string())?;
         if let Some(completed_at) = goal.completed_at() {
             field(w, "Completed", &completed_at.to_string())?;
+        }
+        if !goal.tags().is_empty() {
+            field(w, "Tags", &format_tags(goal.tags()))?;
         }
 
         writeln!(w)?;
