@@ -423,7 +423,6 @@ pub fn complete(
     let started_at = task.started_at().unwrap_or_else(|| task.updated_at());
     let artifacts_list = artifacts.unwrap_or_default();
 
-    let compact_summary = result_summary.clone();
     let outcome = Outcome::new(result_summary, artifacts_list);
     // Derive elapsed time from started_at when the caller doesn't supply one,
     // so agents aren't required to track wall-clock time themselves.
@@ -442,7 +441,6 @@ pub fn complete(
             "Failed to complete task: another process may have changed its state"
         ));
     }
-    task.compact(compact_summary);
     let completed_task = task.clone();
     db.save_task(&completed_task)?;
     let parent_id = completed_task.parent_id().cloned();

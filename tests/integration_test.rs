@@ -1621,14 +1621,16 @@ fn test_compact_analyze_finds_completed_tasks() {
     let env = TestEnv::new();
     env.run(&["init"]).expect("Init failed");
 
-    // Completed tasks are auto-compacted; only failed tasks remain as candidates.
-    let (_goal_id, task_id) = create_failed_task(&env, "Compact");
+    // Completion no longer auto-compacts, so completed tasks are eligible candidates too.
+    let (_goal_id, completed_task_id) = create_completed_task(&env, "Compact completed");
+    let (_goal_id, failed_task_id) = create_failed_task(&env, "Compact failed");
 
     let output = env
         .run(&["compact", "analyze"])
         .expect("Compact analyze failed");
-    assert!(output.contains(&task_id));
-    assert!(output.contains("1 task(s) eligible"));
+    assert!(output.contains(&completed_task_id));
+    assert!(output.contains(&failed_task_id));
+    assert!(output.contains("2 task(s) eligible"));
 }
 
 #[test]
@@ -1723,12 +1725,32 @@ fn test_compact_apply_already_compacted() {
     let env = TestEnv::new();
     env.run(&["init"]).expect("Init failed");
 
-    // Completed tasks are auto-compacted; a manual apply should fail immediately.
+    // Compaction is opt-in, so a second apply on an already-compacted task should fail.
     let (_goal_id, task_id) = create_completed_task(&env, "Double");
+    env.run(&["compact", "apply", &task_id, "--summary", "First summary"])
+        .expect("First compact apply failed");
 
     let result = env.run(&["compact", "apply", &task_id, "--summary", "Any summary"]);
     assert!(result.is_err());
     assert!(result.unwrap_err().contains("already compacted"));
+}
+
+#[test]
+fn test_complete_preserves_description_and_contract() {
+    let env = TestEnv::new();
+    env.run(&["init"]).expect("Init failed");
+
+    // Completing a task must no longer auto-compact it away.
+    let (_goal_id, task_id) = create_completed_task(&env, "Keep");
+
+    let output = env
+        .run(&["show", &task_id, "--json"])
+        .expect("Show --json failed");
+    let parsed: Value = serde_json::from_str(&output).expect("Should be valid JSON");
+    assert_eq!(parsed["compacted"], false);
+    assert_eq!(parsed["description"], "Keep task");
+    assert!(!parsed["contract"].is_null());
+    assert_eq!(parsed["contract"]["receives"], "Input data");
 }
 
 #[test]

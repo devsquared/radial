@@ -179,21 +179,18 @@ rd clean --force             # Remove all goals regardless of status
 - Only `in_progress` tasks can be completed.
 - Only `in_progress` or `verifying` tasks can be failed.
 - Only `failed` tasks can be retried.
-- Completed tasks are auto-compacted; `rd compact apply` will reject them as already compacted.
+- Completed tasks keep their full description, contract, and comments; compaction is opt-in.
 - Failed tasks with `retry_count >= 3` are auto-compacted on the failing call.
 
 ### Compaction
 
-Completed tasks are automatically compacted on completion using the `--result` summary. This
-strips verbose history (contract, comments) while preserving the result summary and any artifact
-paths, keeping context small for future agents.
-
-Failed tasks preserve their full history by default, including comments documenting what was
-tried. They become compaction candidates for manual review.
+Compaction is opt-in — completing a task no longer compacts it automatically. Completed and
+failed tasks both preserve their full history (description, contract, comments) by default,
+and both become candidates for manual review via `rd compact analyze`.
 
 ```bash
 rd task fail <task_id> --reason "..." --compact  # Compact immediately on fail
-rd compact apply <task_id> --summary "..."       # Compact a failed task manually
+rd compact apply <task_id> --summary "..."       # Compact a completed or failed task manually
 rd compact analyze                               # List tasks eligible for compaction
 rd compact analyze --goal <goal_id>              # Filter to a specific goal
 rd compact analyze --json                        # Output as JSON
