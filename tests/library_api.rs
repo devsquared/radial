@@ -53,7 +53,7 @@ fn drives_a_goal_through_create_start_complete_via_ops() {
     )
     .expect("failed to complete task");
     assert_eq!(result.task.state(), TaskState::Completed);
-    assert!(result.unblocked_task_ids.is_empty());
+    assert_eq!(result.unblocked_task_ids, Vec::new());
 
     let goal_after_complete = db
         .get_goal(goal.id())

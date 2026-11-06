@@ -2824,6 +2824,38 @@ fn test_display_ref_usage() {
 }
 
 #[test]
+fn test_goal_cancel_accepts_display_ref() {
+    let env = TestEnv::new();
+    env.run(&["init"]).expect("Init failed");
+
+    env.run(&["goal", "create", "Goal to cancel"])
+        .expect("Create goal failed");
+
+    // `goal cancel` previously only resolved raw nanoid IDs, not display refs
+    // like "g1" -- every other goal/task command already accepted both.
+    let output = env
+        .run(&["goal", "cancel", "g1", "--reason", "no longer needed"])
+        .expect("Cancel goal by display ref failed");
+    assert!(output.contains("Cancelled goal:"));
+
+    let output = env
+        .run(&["show", "g1"])
+        .expect("Show cancelled goal failed");
+    assert!(output.contains("cancelled"));
+}
+
+#[test]
+fn test_version_flag() {
+    let env = TestEnv::new();
+
+    let output = env.run(&["--version"]).expect("--version failed");
+    assert!(output.starts_with("rd "));
+
+    let output = env.run(&["-V"]).expect("-V failed");
+    assert!(output.starts_with("rd "));
+}
+
+#[test]
 fn test_ready_and_task_list_default_to_single_active_goal() {
     let env = TestEnv::new();
     env.run(&["init"]).expect("Init failed");
@@ -2891,7 +2923,7 @@ fn test_shell_completions() {
     let err = env
         .run(&["completions", "not-a-shell"])
         .expect_err("Expected invalid shell to fail");
-    assert!(!err.is_empty());
+    assert_ne!(err, "");
 }
 
 #[test]

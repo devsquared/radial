@@ -4,8 +4,9 @@ use clap_complete::Shell;
 use crate::models::Priority;
 
 #[derive(Parser)]
-#[command(name = "radial")]
+#[command(name = "rd")]
 #[command(about = "Task orchestration for LLM agents", long_about = None)]
+#[command(version)]
 pub struct Cli {
     #[command(subcommand)]
     pub command: Commands,
