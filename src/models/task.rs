@@ -403,6 +403,13 @@ impl Task {
         self.updated_at = Timestamp::now();
     }
 
+    /// Set state to `Pending` or `Blocked` after a `blocked_by` edit, mirroring
+    /// the state `ops::task::create` assigns to a freshly created task.
+    pub(crate) fn set_blocked_state(&mut self, state: TaskState) {
+        self.state = state;
+        self.updated_at = Timestamp::now();
+    }
+
     pub(crate) fn add_comment(&mut self, comment: Comment) {
         self.comments.push(comment);
         self.updated_at = Timestamp::now();

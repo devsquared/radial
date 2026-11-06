@@ -1860,7 +1860,7 @@ fn test_edit_task_blocked_by_validates_ids() {
         .unwrap();
 
     // Editing blocked-by with a nonexistent task ID should fail
-    let result = env.run(&["edit", "task", task_id, "--blocked-by", "AAAAAAAA"]);
+    let result = env.run(&["edit", "task", task_id, "--set-blocked-by", "AAAAAAAA"]);
     assert!(
         result.is_err(),
         "Edit with nonexistent blocked-by should fail"
@@ -1869,10 +1869,17 @@ fn test_edit_task_blocked_by_validates_ids() {
     assert!(err.contains("not found") || err.contains("Task not found in blocked-by list"));
 
     // Editing blocked-by with self-reference should fail
-    let result = env.run(&["edit", "task", task_id, "--blocked-by", task_id]);
+    let result = env.run(&["edit", "task", task_id, "--set-blocked-by", task_id]);
     assert!(result.is_err(), "Edit with self-reference should fail");
     let err = result.unwrap_err();
     assert!(err.contains("cannot block itself"));
+
+    // --add-blocked-by goes through the same existence validation
+    let result = env.run(&["edit", "task", task_id, "--add-blocked-by", "AAAAAAAA"]);
+    assert!(
+        result.is_err(),
+        "Add with nonexistent blocked-by should fail"
+    );
 }
 
 #[test]
@@ -1912,7 +1919,7 @@ fn test_edit_task_blocked_by_rejects_cycles() {
         .to_string();
 
     // Try to edit A to be blocked by B — should fail with cycle error
-    let result = env.run(&["edit", "task", &task_a, "--blocked-by", &task_b]);
+    let result = env.run(&["edit", "task", &task_a, "--set-blocked-by", &task_b]);
     assert!(result.is_err(), "Edit creating a cycle should fail");
     let err = result.unwrap_err();
     assert!(err.contains("Circular dependency detected"));
@@ -1929,13 +1936,359 @@ fn test_edit_task_blocked_by_rejects_cycles() {
         .to_string();
 
     // Try to edit A to be blocked by C — transitive cycle: A -> C -> B -> A
-    let result = env.run(&["edit", "task", &task_a, "--blocked-by", &task_c]);
+    let result = env.run(&["edit", "task", &task_a, "--add-blocked-by", &task_c]);
     assert!(
         result.is_err(),
         "Edit creating a transitive cycle should fail"
     );
     let err = result.unwrap_err();
     assert!(err.contains("Circular dependency detected"));
+}
+
+#[test]
+fn test_edit_task_add_blocked_by_incomplete_blocker_sets_blocked() {
+    let env = TestEnv::new();
+    env.run(&["init"]).expect("Init failed");
+
+    let output = env
+        .run(&["goal", "create", "Add blocked-by state recompute test"])
+        .expect("Create goal failed");
+    let goal_id = output
+        .lines()
+        .find(|l| l.contains("Created goal:"))
+        .and_then(|l| l.split_whitespace().nth(2))
+        .unwrap();
+
+    let output = env
+        .run(&["task", "create", goal_id, "Blocker"])
+        .expect("Create blocker task failed");
+    let blocker = output
+        .lines()
+        .find(|l| l.contains("Created task:"))
+        .and_then(|l| l.split_whitespace().nth(2))
+        .unwrap()
+        .to_string();
+
+    let output = env
+        .run(&["task", "create", goal_id, "Dependent"])
+        .expect("Create dependent task failed");
+    let dependent = output
+        .lines()
+        .find(|l| l.contains("Created task:"))
+        .and_then(|l| l.split_whitespace().nth(2))
+        .unwrap()
+        .to_string();
+
+    // Dependent starts out Pending (no blockers)
+    let output = env
+        .run(&["show", &dependent, "--json"])
+        .expect("Show dependent failed");
+    let json: Value = serde_json::from_str(&output).expect("Invalid JSON");
+    assert_eq!(json["state"], "pending");
+
+    // Adding a still-incomplete blocker must flip it to Blocked, not leave it Pending
+    let output = env
+        .run(&[
+            "edit",
+            "task",
+            &dependent,
+            "--add-blocked-by",
+            &blocker,
+            "--json",
+        ])
+        .expect("Add blocked-by failed");
+    let json: Value = serde_json::from_str(&output).expect("Invalid JSON");
+    assert_eq!(
+        json["state"], "blocked",
+        "task must be Blocked right after adding an incomplete blocker"
+    );
+}
+
+#[test]
+fn test_edit_task_add_blocked_by_completed_blocker_stays_pending() {
+    let env = TestEnv::new();
+    env.run(&["init"]).expect("Init failed");
+
+    let output = env
+        .run(&["goal", "create", "Add completed blocker test"])
+        .expect("Create goal failed");
+    let goal_id = output
+        .lines()
+        .find(|l| l.contains("Created goal:"))
+        .and_then(|l| l.split_whitespace().nth(2))
+        .unwrap();
+
+    let output = env
+        .run(&[
+            "task",
+            "create",
+            goal_id,
+            "Blocker",
+            "--receives",
+            "nothing",
+            "--produces",
+            "something",
+            "--verify",
+            "done",
+        ])
+        .expect("Create blocker task failed");
+    let blocker = output
+        .lines()
+        .find(|l| l.contains("Created task:"))
+        .and_then(|l| l.split_whitespace().nth(2))
+        .unwrap()
+        .to_string();
+
+    env.run(&["task", "start", &blocker, "--assignee", "test"])
+        .expect("Start blocker failed");
+    env.run(&["task", "complete", &blocker, "--result", "done"])
+        .expect("Complete blocker failed");
+
+    let output = env
+        .run(&["task", "create", goal_id, "Dependent"])
+        .expect("Create dependent task failed");
+    let dependent = output
+        .lines()
+        .find(|l| l.contains("Created task:"))
+        .and_then(|l| l.split_whitespace().nth(2))
+        .unwrap()
+        .to_string();
+
+    // Adding an already-completed blocker must leave the task Pending
+    let output = env
+        .run(&[
+            "edit",
+            "task",
+            &dependent,
+            "--add-blocked-by",
+            &blocker,
+            "--json",
+        ])
+        .expect("Add blocked-by failed");
+    let json: Value = serde_json::from_str(&output).expect("Invalid JSON");
+    assert_eq!(json["state"], "pending");
+}
+
+#[test]
+fn test_edit_task_remove_blocked_by_unblocks_task() {
+    let env = TestEnv::new();
+    env.run(&["init"]).expect("Init failed");
+
+    let output = env
+        .run(&["goal", "create", "Remove blocked-by test"])
+        .expect("Create goal failed");
+    let goal_id = output
+        .lines()
+        .find(|l| l.contains("Created goal:"))
+        .and_then(|l| l.split_whitespace().nth(2))
+        .unwrap();
+
+    let output = env
+        .run(&["task", "create", goal_id, "Blocker"])
+        .expect("Create blocker task failed");
+    let blocker = output
+        .lines()
+        .find(|l| l.contains("Created task:"))
+        .and_then(|l| l.split_whitespace().nth(2))
+        .unwrap()
+        .to_string();
+
+    let output = env
+        .run(&[
+            "task",
+            "create",
+            goal_id,
+            "Dependent",
+            "--blocked-by",
+            &blocker,
+        ])
+        .expect("Create dependent task failed");
+    let dependent = output
+        .lines()
+        .find(|l| l.contains("Created task:"))
+        .and_then(|l| l.split_whitespace().nth(2))
+        .unwrap()
+        .to_string();
+
+    let output = env
+        .run(&["show", &dependent, "--json"])
+        .expect("Show dependent failed");
+    let json: Value = serde_json::from_str(&output).expect("Invalid JSON");
+    assert_eq!(json["state"], "blocked");
+
+    // Removing the only (still-incomplete) blocker must unblock it to Pending
+    let output = env
+        .run(&[
+            "edit",
+            "task",
+            &dependent,
+            "--remove-blocked-by",
+            &blocker,
+            "--json",
+        ])
+        .expect("Remove blocked-by failed");
+    let json: Value = serde_json::from_str(&output).expect("Invalid JSON");
+    assert_eq!(json["state"], "pending");
+    assert!(
+        json["blocked_by"].as_array().is_none_or(Vec::is_empty),
+        "blocked_by must be empty after removing the only blocker"
+    );
+}
+
+#[test]
+fn test_edit_task_remove_blocked_by_rejects_id_not_in_list() {
+    let env = TestEnv::new();
+    env.run(&["init"]).expect("Init failed");
+
+    let output = env
+        .run(&["goal", "create", "Remove validation test"])
+        .expect("Create goal failed");
+    let goal_id = output
+        .lines()
+        .find(|l| l.contains("Created goal:"))
+        .and_then(|l| l.split_whitespace().nth(2))
+        .unwrap();
+
+    let output = env
+        .run(&["task", "create", goal_id, "Unrelated"])
+        .expect("Create unrelated task failed");
+    let unrelated = output
+        .lines()
+        .find(|l| l.contains("Created task:"))
+        .and_then(|l| l.split_whitespace().nth(2))
+        .unwrap()
+        .to_string();
+
+    let output = env
+        .run(&["task", "create", goal_id, "Dependent"])
+        .expect("Create dependent task failed");
+    let dependent = output
+        .lines()
+        .find(|l| l.contains("Created task:"))
+        .and_then(|l| l.split_whitespace().nth(2))
+        .unwrap()
+        .to_string();
+
+    let result = env.run(&[
+        "edit",
+        "task",
+        &dependent,
+        "--remove-blocked-by",
+        &unrelated,
+    ]);
+    assert!(
+        result.is_err(),
+        "Removing an ID that isn't in blocked_by should fail"
+    );
+    let err = result.unwrap_err();
+    assert!(err.contains("not in blocked-by list"));
+}
+
+#[test]
+fn test_edit_task_set_blocked_by_rejects_combination_with_add_or_remove() {
+    let env = TestEnv::new();
+    env.run(&["init"]).expect("Init failed");
+
+    let output = env
+        .run(&["goal", "create", "Combination validation test"])
+        .expect("Create goal failed");
+    let goal_id = output
+        .lines()
+        .find(|l| l.contains("Created goal:"))
+        .and_then(|l| l.split_whitespace().nth(2))
+        .unwrap();
+
+    let output = env
+        .run(&["task", "create", goal_id, "Blocker"])
+        .expect("Create blocker task failed");
+    let blocker = output
+        .lines()
+        .find(|l| l.contains("Created task:"))
+        .and_then(|l| l.split_whitespace().nth(2))
+        .unwrap()
+        .to_string();
+
+    let output = env
+        .run(&["task", "create", goal_id, "Dependent"])
+        .expect("Create dependent task failed");
+    let dependent = output
+        .lines()
+        .find(|l| l.contains("Created task:"))
+        .and_then(|l| l.split_whitespace().nth(2))
+        .unwrap()
+        .to_string();
+
+    let result = env.run(&[
+        "edit",
+        "task",
+        &dependent,
+        "--set-blocked-by",
+        &blocker,
+        "--add-blocked-by",
+        &blocker,
+    ]);
+    assert!(
+        result.is_err(),
+        "--set-blocked-by combined with --add-blocked-by should fail"
+    );
+    let err = result.unwrap_err();
+    assert!(err.contains("cannot be combined"));
+}
+
+#[test]
+fn test_edit_task_deprecated_blocked_by_behaves_as_set() {
+    let env = TestEnv::new();
+    env.run(&["init"]).expect("Init failed");
+
+    let output = env
+        .run(&["goal", "create", "Deprecated flag alias test"])
+        .expect("Create goal failed");
+    let goal_id = output
+        .lines()
+        .find(|l| l.contains("Created goal:"))
+        .and_then(|l| l.split_whitespace().nth(2))
+        .unwrap();
+
+    let output = env
+        .run(&["task", "create", goal_id, "Blocker"])
+        .expect("Create blocker task failed");
+    let blocker = output
+        .lines()
+        .find(|l| l.contains("Created task:"))
+        .and_then(|l| l.split_whitespace().nth(2))
+        .unwrap()
+        .to_string();
+
+    let output = env
+        .run(&["task", "create", goal_id, "Dependent"])
+        .expect("Create dependent task failed");
+    let dependent = output
+        .lines()
+        .find(|l| l.contains("Created task:"))
+        .and_then(|l| l.split_whitespace().nth(2))
+        .unwrap()
+        .to_string();
+
+    // The old flag still works for one release, aliasing to --set-blocked-by
+    let output = env
+        .run(&[
+            "edit",
+            "task",
+            &dependent,
+            "--blocked-by",
+            &blocker,
+            "--json",
+        ])
+        .expect("Deprecated --blocked-by edit failed");
+    let json: Value = serde_json::from_str(&output).expect("Invalid JSON");
+    assert_eq!(json["state"], "blocked");
+    let blocked_by: Vec<&str> = json["blocked_by"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|v| v.as_str().unwrap())
+        .collect();
+    assert_eq!(blocked_by, vec![blocker.as_str()]);
 }
 
 #[test]

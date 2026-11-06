@@ -430,8 +430,20 @@ pub enum EditCommands {
         #[arg(long)]
         verify: Option<String>,
 
-        /// Add a blocked-by dependency (comma or space separated)
+        /// Add dependencies to the task's existing blocked-by list (comma or space separated)
         #[arg(long, value_delimiter = ',', num_args = 1..)]
+        add_blocked_by: Option<Vec<String>>,
+
+        /// Remove dependencies from the task's existing blocked-by list (comma or space separated)
+        #[arg(long, value_delimiter = ',', num_args = 1..)]
+        remove_blocked_by: Option<Vec<String>>,
+
+        /// Replace the task's entire blocked-by list (comma or space separated)
+        #[arg(long, value_delimiter = ',', num_args = 1..)]
+        set_blocked_by: Option<Vec<String>>,
+
+        /// Deprecated: alias for --set-blocked-by, kept for one release
+        #[arg(long, value_delimiter = ',', num_args = 1.., hide = true)]
         blocked_by: Option<Vec<String>>,
 
         /// Output as JSON

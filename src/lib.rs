@@ -370,9 +370,17 @@ fn run(cli: Cli) -> Result<()> {
                     receives,
                     produces,
                     verify,
+                    add_blocked_by,
+                    remove_blocked_by,
+                    set_blocked_by,
                     blocked_by,
                     json,
                 } => {
+                    if blocked_by.is_some() {
+                        eprintln!(
+                            "warning: --blocked-by is deprecated, use --set-blocked-by instead"
+                        );
+                    }
                     let task_id = db.resolve_any_task(&task_id).map_err(|e| anyhow!("{e}"))?;
                     let task = ops::edit::task(
                         &task_id,
@@ -381,7 +389,9 @@ fn run(cli: Cli) -> Result<()> {
                         receives,
                         produces,
                         verify,
-                        parse_blocked_by(blocked_by, &db)?,
+                        parse_blocked_by(add_blocked_by, &db)?,
+                        parse_blocked_by(remove_blocked_by, &db)?,
+                        parse_blocked_by(set_blocked_by.or(blocked_by), &db)?,
                         &mut db,
                     )?;
                     output::task_edited(&task, &RenderOptions::new().json(json))
