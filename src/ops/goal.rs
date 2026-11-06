@@ -79,9 +79,11 @@ pub fn cancel(
 
     let mut cancelled_task_ids = Vec::new();
 
-    // Cancel each non-terminal task
+    // Cancel each non-terminal task. `force: true` because this cascade
+    // includes parent tasks with open subtasks, which `task::cancel` would
+    // otherwise refuse — cancelling the goal implies cancelling them too.
     for task_id in &tasks_to_cancel {
-        task::cancel(task_id, reason.clone(), author, false, db)?;
+        task::cancel(task_id, reason.clone(), author, false, true, db)?;
         cancelled_task_ids.push(task_id.clone());
     }
 

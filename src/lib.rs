@@ -236,41 +236,52 @@ fn run_task(task_cmd: TaskCommands, db: &mut Database) -> Result<()> {
             artifacts,
             tokens,
             elapsed,
+            force,
             json,
         } => {
             let task_id = db.resolve_any_task(&task_id).map_err(|e| anyhow!("{e}"))?;
             let complete_result =
-                ops::task::complete(&task_id, result, artifacts, tokens, elapsed, db)?;
+                ops::task::complete(&task_id, result, artifacts, tokens, elapsed, force, db)?;
             output::task_completed(&complete_result, &RenderOptions::new().json(json))
         }
         TaskCommands::Fail {
             task_id,
             reason,
             compact,
+            force,
             json,
         } => {
             let task_id = db.resolve_any_task(&task_id).map_err(|e| anyhow!("{e}"))?;
-            let task = ops::task::fail(&task_id, reason, compact, db)?;
+            let task = ops::task::fail(&task_id, reason, compact, force, db)?;
             output::task_failed(&task, &RenderOptions::new().json(json))
         }
         TaskCommands::Cancel {
             task_id,
             reason,
             cascade,
+            force,
             json,
         } => {
             let task_id = db.resolve_any_task(&task_id).map_err(|e| anyhow!("{e}"))?;
-            let result = ops::task::cancel(&task_id, reason, "cli", cascade, db)?;
+            let result = ops::task::cancel(&task_id, reason, "cli", cascade, force, db)?;
             output::task_cancelled(&result, &RenderOptions::new().json(json))
         }
-        TaskCommands::Retry { task_id, json } => {
+        TaskCommands::Retry {
+            task_id,
+            force,
+            json,
+        } => {
             let task_id = db.resolve_any_task(&task_id).map_err(|e| anyhow!("{e}"))?;
-            let task = ops::task::retry(&task_id, db)?;
+            let task = ops::task::retry(&task_id, force, db)?;
             output::task_retry(&task, &RenderOptions::new().json(json))
         }
-        TaskCommands::Submit { task_id, json } => {
+        TaskCommands::Submit {
+            task_id,
+            force,
+            json,
+        } => {
             let task_id = db.resolve_any_task(&task_id).map_err(|e| anyhow!("{e}"))?;
-            let task = ops::task::submit(&task_id, db)?;
+            let task = ops::task::submit(&task_id, force, db)?;
             output::task_submitted(&task, &RenderOptions::new().json(json))
         }
         TaskCommands::Accept {
@@ -279,26 +290,29 @@ fn run_task(task_cmd: TaskCommands, db: &mut Database) -> Result<()> {
             artifacts,
             tokens,
             elapsed,
+            force,
             json,
         } => {
             let task_id = db.resolve_any_task(&task_id).map_err(|e| anyhow!("{e}"))?;
             let complete_result =
-                ops::task::accept(&task_id, result, artifacts, tokens, elapsed, db)?;
+                ops::task::accept(&task_id, result, artifacts, tokens, elapsed, force, db)?;
             output::task_accepted(&complete_result, &RenderOptions::new().json(json))
         }
         TaskCommands::Reject {
             task_id,
             reason,
+            force,
             json,
         } => {
             let task_id = db.resolve_any_task(&task_id).map_err(|e| anyhow!("{e}"))?;
-            let task = ops::task::reject(&task_id, reason, db)?;
+            let task = ops::task::reject(&task_id, reason, force, db)?;
             output::task_rejected(&task, &RenderOptions::new().json(json))
         }
         TaskCommands::Release {
             task_id,
             stale,
             all_in_progress,
+            force,
             json,
         } => {
             let opts = RenderOptions::new().json(json);
@@ -306,7 +320,7 @@ fn run_task(task_cmd: TaskCommands, db: &mut Database) -> Result<()> {
                 let task_id = db
                     .resolve_any_task(task_id_str)
                     .map_err(|e| anyhow!("{e}"))?;
-                let task = ops::task::release(&task_id, db)?;
+                let task = ops::task::release(&task_id, force, db)?;
                 output::task_released(&task, &opts)
             } else if let Some(duration_str) = stale {
                 let threshold = crate::duration::parse_duration(&duration_str)?;

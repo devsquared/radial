@@ -536,6 +536,28 @@ impl Database {
         self.tasks.values().any(|t| t.parent_id() == Some(task_id))
     }
 
+    /// The blockers that still apply to `task`: its own `blocked_by`, plus
+    /// its parent's (if any), minus anything already `Completed`. Computed
+    /// at call time and not persisted, so a subtask inherits its parent's
+    /// outstanding blockers without them being copied onto it by hand.
+    pub fn effective_blockers(&self, task: &Task) -> Vec<TaskId> {
+        let mut blockers: Vec<TaskId> = task.blocked_by().to_vec();
+        if let Some(parent) = task.parent_id().and_then(|pid| self.get_task(pid)) {
+            for id in parent.blocked_by() {
+                if !blockers.contains(id) {
+                    blockers.push(id.clone());
+                }
+            }
+        }
+        blockers
+            .into_iter()
+            .filter(|id| {
+                self.get_task(id)
+                    .is_none_or(|t| t.state() != TaskState::Completed)
+            })
+            .collect()
+    }
+
     /// Derive the parent task's state from its subtasks and persist if changed.
     /// Returns the derived state if the parent was updated, None if unchanged or no subtasks.
     pub fn sync_parent_state(&mut self, parent_id: &TaskId) -> Result<Option<TaskState>> {

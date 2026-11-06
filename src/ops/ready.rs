@@ -20,6 +20,9 @@ pub fn run(
         .into_iter()
         .filter(|t| t.state() == TaskState::Pending && t.contract().is_some())
         .filter(|t| !db.has_subtasks(t.id()))
+        // A subtask can be Pending on its own merits while still inheriting
+        // an unresolved blocker from its parent; state alone doesn't reflect that.
+        .filter(|t| db.effective_blockers(t).is_empty())
         .filter(|t| priority.is_none_or(|p| t.priority() == *p))
         .map(|t| {
             let parent = t.parent_id().and_then(|pid| db.get_task(pid)).cloned();

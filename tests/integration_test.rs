@@ -3648,3 +3648,361 @@ fn test_show_and_status_goal_json_have_no_duplicate_metrics_key() {
         assert_eq!(parsed["metrics"]["task_count"], 1);
     }
 }
+
+fn extract_created_id(output: &str, marker: &str) -> String {
+    output
+        .lines()
+        .find(|l| l.contains(marker))
+        .and_then(|l| l.split_whitespace().nth(2))
+        .unwrap_or_else(|| panic!("could not find `{marker}` in output:\n{output}"))
+        .to_string()
+}
+
+#[test]
+fn test_subtask_inherits_unresolved_parent_blocker() {
+    let env = TestEnv::new();
+    env.run(&["init"]).expect("Init failed");
+
+    let output = env
+        .run(&["goal", "create", "Effective blockers test"])
+        .expect("Create goal failed");
+    let goal_id = extract_created_id(&output, "Created goal:");
+
+    let output = env
+        .run(&[
+            "task",
+            "create",
+            &goal_id,
+            "Blocker",
+            "--receives",
+            "x",
+            "--produces",
+            "y",
+            "--verify",
+            "z",
+        ])
+        .expect("Create blocker failed");
+    let blocker = extract_created_id(&output, "Created task:");
+
+    let output = env
+        .run(&[
+            "task",
+            "create",
+            &goal_id,
+            "Parent",
+            "--blocked-by",
+            &blocker,
+        ])
+        .expect("Create parent failed");
+    let parent = extract_created_id(&output, "Created task:");
+
+    let output = env
+        .run(&[
+            "task",
+            "create",
+            &goal_id,
+            "Subtask",
+            "--parent",
+            &parent,
+            "--receives",
+            "x",
+            "--produces",
+            "y",
+            "--verify",
+            "z",
+        ])
+        .expect("Create subtask failed");
+    let subtask = extract_created_id(&output, "Created task:");
+
+    // The subtask has no blocked_by of its own, so its persisted state is
+    // pending — the parent's blocker isn't reflected there.
+    let show = env
+        .run(&["show", &subtask, "--json"])
+        .expect("Show subtask failed");
+    let json: Value = serde_json::from_str(&show).expect("Invalid JSON");
+    assert_eq!(json["state"], "pending");
+
+    // But it still can't start: it inherits the parent's unresolved blocker.
+    let result = env.run(&["task", "start", &subtask, "--assignee", "agent"]);
+    let err = result.expect_err("starting a subtask of a blocked parent should fail");
+    assert!(
+        err.contains(&blocker),
+        "error should name the inherited blocker: {err}"
+    );
+    assert!(
+        err.contains("parent"),
+        "error should say the blocker comes from the parent: {err}"
+    );
+
+    // Once the blocker completes, the subtask becomes startable.
+    env.run(&["task", "start", &blocker, "--assignee", "agent"])
+        .expect("Start blocker failed");
+    env.run(&["task", "complete", &blocker, "--result", "Done"])
+        .expect("Complete blocker failed");
+
+    env.run(&["task", "start", &subtask, "--assignee", "agent"])
+        .expect("subtask should be startable once the inherited blocker is resolved");
+}
+
+#[test]
+fn test_ready_excludes_subtask_blocked_by_parent() {
+    let env = TestEnv::new();
+    env.run(&["init"]).expect("Init failed");
+
+    let output = env
+        .run(&["goal", "create", "Ready effective blockers test"])
+        .expect("Create goal failed");
+    let goal_id = extract_created_id(&output, "Created goal:");
+
+    let output = env
+        .run(&[
+            "task",
+            "create",
+            &goal_id,
+            "Blocker",
+            "--receives",
+            "x",
+            "--produces",
+            "y",
+            "--verify",
+            "z",
+        ])
+        .expect("Create blocker failed");
+    let blocker = extract_created_id(&output, "Created task:");
+
+    let output = env
+        .run(&[
+            "task",
+            "create",
+            &goal_id,
+            "Parent",
+            "--blocked-by",
+            &blocker,
+        ])
+        .expect("Create parent failed");
+    let parent = extract_created_id(&output, "Created task:");
+
+    let output = env
+        .run(&[
+            "task",
+            "create",
+            &goal_id,
+            "Subtask",
+            "--parent",
+            &parent,
+            "--receives",
+            "x",
+            "--produces",
+            "y",
+            "--verify",
+            "z",
+        ])
+        .expect("Create subtask failed");
+    let subtask = extract_created_id(&output, "Created task:");
+
+    let output = env
+        .run(&["ready", &goal_id, "--json"])
+        .expect("Ready failed");
+    let json: Value = serde_json::from_str(&output).expect("Invalid JSON");
+    let ids: Vec<&str> = json
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|t| t["id"].as_str().unwrap())
+        .collect();
+    assert!(
+        !ids.contains(&subtask.as_str()),
+        "subtask should not be ready while its parent's blocker is unresolved: {ids:?}"
+    );
+
+    env.run(&["task", "start", &blocker, "--assignee", "agent"])
+        .expect("Start blocker failed");
+    env.run(&["task", "complete", &blocker, "--result", "Done"])
+        .expect("Complete blocker failed");
+
+    let output = env
+        .run(&["ready", &goal_id, "--json"])
+        .expect("Ready failed");
+    let json: Value = serde_json::from_str(&output).expect("Invalid JSON");
+    let ids: Vec<&str> = json
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|t| t["id"].as_str().unwrap())
+        .collect();
+    assert!(
+        ids.contains(&subtask.as_str()),
+        "subtask should be ready once the parent's blocker resolves: {ids:?}"
+    );
+}
+
+#[test]
+fn test_complete_parent_requires_force_and_records_override_comment() {
+    let env = TestEnv::new();
+    env.run(&["init"]).expect("Init failed");
+
+    let output = env
+        .run(&["goal", "create", "Force override test"])
+        .expect("Create goal failed");
+    let goal_id = extract_created_id(&output, "Created goal:");
+
+    let output = env
+        .run(&["task", "create", &goal_id, "Parent"])
+        .expect("Create parent failed");
+    let parent = extract_created_id(&output, "Created task:");
+
+    let output = env
+        .run(&[
+            "task",
+            "create",
+            &goal_id,
+            "Subtask",
+            "--parent",
+            &parent,
+            "--receives",
+            "x",
+            "--produces",
+            "y",
+            "--verify",
+            "z",
+        ])
+        .expect("Create subtask failed");
+    let subtask = extract_created_id(&output, "Created task:");
+
+    // Starting the subtask makes the parent's derived state in_progress.
+    env.run(&["task", "start", &subtask, "--assignee", "agent"])
+        .expect("Start subtask failed");
+
+    // The parent can't be completed directly while the subtask is still open.
+    let result = env.run(&["task", "complete", &parent, "--result", "Done"]);
+    let err = result.expect_err("completing a parent with open subtasks should fail");
+    assert!(
+        err.contains(&subtask),
+        "error should name the open subtask: {err}"
+    );
+    assert!(
+        err.contains("--force"),
+        "error should mention --force: {err}"
+    );
+
+    // --force bypasses it and records an override comment on the parent.
+    env.run(&["task", "complete", &parent, "--result", "Done", "--force"])
+        .expect("force-complete should succeed");
+
+    let show = env
+        .run(&["show", &parent, "--json"])
+        .expect("Show parent failed");
+    let json: Value = serde_json::from_str(&show).expect("Invalid JSON");
+    assert_eq!(json["state"], "completed");
+
+    let comments = env
+        .run(&["task", "comments", &parent, "--json"])
+        .expect("Comments failed");
+    assert!(
+        comments.contains("--force override"),
+        "override should be recorded as a comment: {comments}"
+    );
+}
+
+#[test]
+fn test_cancel_parent_with_subtasks_requires_force() {
+    let env = TestEnv::new();
+    env.run(&["init"]).expect("Init failed");
+
+    let output = env
+        .run(&["goal", "create", "Cancel force override test"])
+        .expect("Create goal failed");
+    let goal_id = extract_created_id(&output, "Created goal:");
+
+    let output = env
+        .run(&["task", "create", &goal_id, "Parent"])
+        .expect("Create parent failed");
+    let parent = extract_created_id(&output, "Created task:");
+
+    let output = env
+        .run(&["task", "create", &goal_id, "Subtask", "--parent", &parent])
+        .expect("Create subtask failed");
+    let subtask = extract_created_id(&output, "Created task:");
+
+    let result = env.run(&["task", "cancel", &parent]);
+    let err = result.expect_err("cancelling a parent with open subtasks should fail");
+    assert!(
+        err.contains(&subtask),
+        "error should name the open subtask: {err}"
+    );
+
+    env.run(&["task", "cancel", &parent, "--force"])
+        .expect("force-cancel should succeed");
+
+    let show = env
+        .run(&["show", &parent, "--json"])
+        .expect("Show parent failed");
+    let json: Value = serde_json::from_str(&show).expect("Invalid JSON");
+    assert_eq!(json["state"], "cancelled");
+}
+
+#[test]
+fn test_delete_parent_with_subtasks_has_no_force_option() {
+    let env = TestEnv::new();
+    env.run(&["init"]).expect("Init failed");
+
+    let output = env
+        .run(&["goal", "create", "Delete has no force test"])
+        .expect("Create goal failed");
+    let goal_id = extract_created_id(&output, "Created goal:");
+
+    let output = env
+        .run(&["task", "create", &goal_id, "Parent"])
+        .expect("Create parent failed");
+    let parent = extract_created_id(&output, "Created task:");
+
+    let output = env
+        .run(&["task", "create", &goal_id, "Subtask", "--parent", &parent])
+        .expect("Create subtask failed");
+    let subtask = extract_created_id(&output, "Created task:");
+
+    // Delete deliberately has no --force: cascade-deleting subtasks is a
+    // separate, riskier decision this PR doesn't make. The error should
+    // still clearly name the blocking subtask.
+    let result = env.run(&["task", "delete", &parent]);
+    let err = result.expect_err("deleting a parent with subtasks should fail");
+    assert!(
+        err.contains(&subtask),
+        "error should name the blocking subtask: {err}"
+    );
+
+    let result = env.run(&["task", "delete", &parent, "--force"]);
+    assert!(
+        result.is_err(),
+        "--force should not be a recognized flag for delete"
+    );
+}
+
+#[test]
+fn test_goal_cancel_forces_past_parent_with_subtasks() {
+    let env = TestEnv::new();
+    env.run(&["init"]).expect("Init failed");
+
+    let output = env
+        .run(&["goal", "create", "Goal cancel with hierarchy test"])
+        .expect("Create goal failed");
+    let goal_id = extract_created_id(&output, "Created goal:");
+
+    let output = env
+        .run(&["task", "create", &goal_id, "Parent"])
+        .expect("Create parent failed");
+    let parent = extract_created_id(&output, "Created task:");
+
+    env.run(&["task", "create", &goal_id, "Subtask", "--parent", &parent])
+        .expect("Create subtask failed");
+
+    // Cancelling the whole goal must not be blocked by the parent's subtasks.
+    env.run(&["goal", "cancel", &goal_id])
+        .expect("goal cancel should succeed even with a parent/subtask task in it");
+
+    let show = env
+        .run(&["show", &parent, "--json"])
+        .expect("Show parent failed");
+    let json: Value = serde_json::from_str(&show).expect("Invalid JSON");
+    assert_eq!(json["state"], "cancelled");
+}

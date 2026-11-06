@@ -49,6 +49,65 @@ fn task_not_found_err(task_id: &TaskId, db: &Database) -> anyhow::Error {
     }
 }
 
+/// Builds the "has subtasks" error for an op that refuses to act on a
+/// parent directly, naming every subtask (and its state) so the caller can
+/// decide whether to resolve them individually or, if `suggest_force` is
+/// set, pass `--force` to run `verb` on the parent anyway.
+fn subtasks_block_err(
+    task_id: &TaskId,
+    verb: &str,
+    suggest_force: bool,
+    db: &Database,
+) -> anyhow::Error {
+    let subtasks = db.list_subtasks(task_id);
+    let ids: Vec<String> = subtasks
+        .iter()
+        .map(|t| format!("{} [{}]", t.id(), t.state().as_ref()))
+        .collect();
+
+    let force_hint = if suggest_force {
+        format!(
+            " Or pass --force to run '{verb}' on {task_id} directly anyway (recorded as a comment on it)."
+        )
+    } else {
+        String::new()
+    };
+    anyhow!(
+        "Task {task_id} has {} subtask(s): {}.\nRun '{verb}' on them individually instead.{force_hint}",
+        subtasks.len(),
+        ids.join(", "),
+    )
+}
+
+/// Builds the comment text recording that `verb` was run on a parent task
+/// directly via `--force` despite open subtasks.
+fn force_override_comment_text(task_id: &TaskId, verb: &str, db: &Database) -> String {
+    let total = db.list_subtasks(task_id).len();
+    let open = db
+        .list_subtasks(task_id)
+        .iter()
+        .filter(|t| !matches!(t.state(), TaskState::Completed | TaskState::Cancelled))
+        .count();
+    format!(
+        "--force override: ran '{verb}' on this task directly despite {open} open subtask(s) ({total} total)."
+    )
+}
+
+/// Records a `--force` override comment on a parent task, so it's visible
+/// in its history.
+///
+/// Note: this sets the parent's state explicitly, but a later state change
+/// on any of its subtasks triggers `sync_parent_state`, which recomputes the
+/// parent's state from its subtasks and can silently overwrite this one.
+fn record_force_override(task_id: &TaskId, verb: &str, db: &mut Database) -> Result<()> {
+    let text = force_override_comment_text(task_id, verb, db);
+    let task = db
+        .get_task_mut(task_id)
+        .ok_or_else(|| anyhow!("Task not found: {task_id}"))?;
+    task.add_comment(Comment::new(generate_id(), text, Timestamp::now()));
+    Ok(())
+}
+
 /// Create a new task under a goal.
 ///
 /// Validates the parent task (if any) and the `blocked_by` IDs (if any)
@@ -218,8 +277,11 @@ pub fn list(
 /// Start a task: assign it and transition it to `InProgress`.
 ///
 /// Fails if the task has subtasks, has no contract, or is not
-/// `Pending`/`Blocked` (unless `force` overrides an outstanding blocker).
-/// Also transitions the parent goal to `InProgress` on its first task start.
+/// `Pending`/`Blocked` (unless `force` overrides an outstanding blocker — its
+/// own, or one inherited from an unfinished parent). Also transitions the
+/// parent goal to `InProgress` on its first task start, and syncs the
+/// parent task's derived state so a parent reflects `InProgress` as soon as
+/// any of its subtasks does.
 pub fn start(task_id: &TaskId, assignee: &str, force: bool, db: &mut Database) -> Result<Task> {
     let task = db.get_task(task_id);
 
@@ -230,9 +292,7 @@ pub fn start(task_id: &TaskId, assignee: &str, force: bool, db: &mut Database) -
     let task = task.unwrap();
 
     if db.has_subtasks(task_id) {
-        return Err(anyhow!(
-            "Task {task_id} has subtasks and cannot be started directly. Start its subtasks instead."
-        ));
+        return Err(subtasks_block_err(task_id, "start", false, db));
     }
 
     if task.contract().is_none() {
@@ -242,12 +302,37 @@ pub fn start(task_id: &TaskId, assignee: &str, force: bool, db: &mut Database) -
         ));
     }
 
-    if !force && task.state() == TaskState::Blocked && !task.blocked_by().is_empty() {
-        let ids: Vec<&str> = task.blocked_by().iter().map(AsRef::as_ref).collect();
-        return Err(anyhow!(
-            "Task is blocked by: {}\nComplete those tasks first, or use --force to override.",
-            ids.join(", ")
-        ));
+    let effective = db.effective_blockers(task);
+    if !force && !effective.is_empty() {
+        let own: Vec<&str> = effective
+            .iter()
+            .filter(|id| task.blocked_by().contains(id))
+            .map(AsRef::as_ref)
+            .collect();
+        let inherited: Vec<&str> = effective
+            .iter()
+            .filter(|id| !task.blocked_by().contains(id))
+            .map(AsRef::as_ref)
+            .collect();
+
+        let own_line = if own.is_empty() {
+            String::new()
+        } else {
+            format!("Task is blocked by: {}\n", own.join(", "))
+        };
+        let inherited_line = if inherited.is_empty() {
+            String::new()
+        } else {
+            let pid = task.parent_id().map(AsRef::as_ref).unwrap_or_default();
+            format!(
+                "Task inherits unfinished blocker(s) from parent {pid}: {}\n",
+                inherited.join(", ")
+            )
+        };
+        let msg = format!(
+            "{own_line}{inherited_line}Complete those tasks first, or use --force to override."
+        );
+        return Err(anyhow!(msg));
     }
 
     if task.state() != TaskState::Pending && task.state() != TaskState::Blocked {
@@ -258,6 +343,7 @@ pub fn start(task_id: &TaskId, assignee: &str, force: bool, db: &mut Database) -
     }
 
     let goal_id = task.goal_id().to_owned();
+    let parent_id = task.parent_id().cloned();
 
     let task = db.get_task_mut(task_id).unwrap();
     let started = task.transition_from_any(
@@ -272,6 +358,10 @@ pub fn start(task_id: &TaskId, assignee: &str, force: bool, db: &mut Database) -
     task.set_assignee(Some(assignee.to_owned()));
     let task = task.clone();
     db.save_task(&task)?;
+
+    if let Some(ref pid) = parent_id {
+        db.sync_parent_state(pid)?;
+    }
 
     // Transition the goal to in_progress on first task start.
     let goal = db.get_goal_mut(&goal_id).unwrap();
@@ -387,13 +477,14 @@ pub fn find_stale_tasks(threshold: SignedDuration, db: &Database) -> Vec<&Task> 
 /// Compacts the task, unblocks any tasks that were waiting on it (or on its
 /// parent, if completing this task also completes the parent), and updates
 /// the goal's state if every task under it is now resolved.
-#[allow(clippy::too_many_lines)]
+#[allow(clippy::too_many_lines, clippy::too_many_arguments)]
 pub fn complete(
     task_id: &TaskId,
     result_summary: String,
     artifacts: Option<Vec<String>>,
     tokens: Option<i64>,
     elapsed: Option<i64>,
+    force: bool,
     db: &mut Database,
 ) -> Result<CompleteResult> {
     let task = db.get_task(task_id);
@@ -404,11 +495,10 @@ pub fn complete(
 
     let task = task.unwrap();
 
-    if db.has_subtasks(task_id) {
-        return Err(anyhow!(
-            "Task {task_id} has subtasks and cannot be completed directly. Complete its subtasks instead."
-        ));
+    if db.has_subtasks(task_id) && !force {
+        return Err(subtasks_block_err(task_id, "complete", true, db));
     }
+    let force_override = force && db.has_subtasks(task_id);
 
     if task.state() != TaskState::InProgress {
         return Err(anyhow!(
@@ -418,18 +508,23 @@ pub fn complete(
     }
 
     let outcome = build_outcome_and_metrics(task, result_summary, artifacts, tokens, elapsed);
+    if force_override {
+        record_force_override(task_id, "complete", db)?;
+    }
     finish_completion(task_id, outcome.0, outcome.1, db)
 }
 
 /// Accept a task under review, completing it the same way `complete` does
 /// from `InProgress` — but from `Verifying`, as the other half of the
 /// `submit`/`accept`/`reject` review flow.
+#[allow(clippy::too_many_arguments)]
 pub fn accept(
     task_id: &TaskId,
     result_summary: String,
     artifacts: Option<Vec<String>>,
     tokens: Option<i64>,
     elapsed: Option<i64>,
+    force: bool,
     db: &mut Database,
 ) -> Result<CompleteResult> {
     let task = db.get_task(task_id);
@@ -440,11 +535,10 @@ pub fn accept(
 
     let task = task.unwrap();
 
-    if db.has_subtasks(task_id) {
-        return Err(anyhow!(
-            "Task {task_id} has subtasks and cannot be accepted directly. Accept its subtasks instead."
-        ));
+    if db.has_subtasks(task_id) && !force {
+        return Err(subtasks_block_err(task_id, "accept", true, db));
     }
+    let force_override = force && db.has_subtasks(task_id);
 
     if task.state() != TaskState::Verifying {
         return Err(anyhow!(
@@ -454,6 +548,9 @@ pub fn accept(
     }
 
     let outcome = build_outcome_and_metrics(task, result_summary, artifacts, tokens, elapsed);
+    if force_override {
+        record_force_override(task_id, "accept", db)?;
+    }
     finish_completion(task_id, outcome.0, outcome.1, db)
 }
 
@@ -600,6 +697,7 @@ pub fn fail(
     task_id: &TaskId,
     reason: Option<String>,
     compact: bool,
+    force: bool,
     db: &mut Database,
 ) -> Result<Task> {
     let task = db.get_task(task_id);
@@ -610,11 +708,10 @@ pub fn fail(
 
     let task = task.unwrap();
 
-    if db.has_subtasks(task_id) {
-        return Err(anyhow!(
-            "Task {task_id} has subtasks and cannot be failed directly. Fail its subtasks instead."
-        ));
+    if db.has_subtasks(task_id) && !force {
+        return Err(subtasks_block_err(task_id, "fail", true, db));
     }
+    let force_override = force && db.has_subtasks(task_id);
 
     if task.state() != TaskState::InProgress && task.state() != TaskState::Verifying {
         return Err(anyhow!(
@@ -648,7 +745,11 @@ pub fn fail(
         task.compact(summary);
     }
 
-    let failed_task = task.clone();
+    if force_override {
+        record_force_override(task_id, "fail", db)?;
+    }
+
+    let failed_task = db.get_task(task_id).unwrap().clone();
     db.save_task(&failed_task)?;
 
     if let Some(pid) = failed_task.parent_id() {
@@ -663,7 +764,7 @@ pub fn fail(
 /// caller needs an explicit `start` to resume work), increments its retry
 /// count, and records the prior result as a comment tagged with the attempt
 /// number.
-pub fn retry(task_id: &TaskId, db: &mut Database) -> Result<Task> {
+pub fn retry(task_id: &TaskId, force: bool, db: &mut Database) -> Result<Task> {
     let task = db.get_task(task_id);
 
     if task.is_none() {
@@ -672,11 +773,10 @@ pub fn retry(task_id: &TaskId, db: &mut Database) -> Result<Task> {
 
     let task = task.unwrap();
 
-    if db.has_subtasks(task_id) {
-        return Err(anyhow!(
-            "Task {task_id} has subtasks and cannot be retried directly. Retry its subtasks instead."
-        ));
+    if db.has_subtasks(task_id) && !force {
+        return Err(subtasks_block_err(task_id, "retry", true, db));
     }
+    let force_override = force && db.has_subtasks(task_id);
 
     if task.state() != TaskState::Failed {
         return Err(anyhow!(
@@ -689,7 +789,10 @@ pub fn retry(task_id: &TaskId, db: &mut Database) -> Result<Task> {
     if !task.retry() {
         return Err(anyhow!("Failed to retry task: state may have changed"));
     }
-    let retried_task = task.clone();
+    if force_override {
+        record_force_override(task_id, "retry", db)?;
+    }
+    let retried_task = db.get_task(task_id).unwrap().clone();
     db.save_task(&retried_task)?;
 
     if let Some(pid) = retried_task.parent_id() {
@@ -704,7 +807,7 @@ pub fn retry(task_id: &TaskId, db: &mut Database) -> Result<Task> {
 /// result recorded yet. The task stays excluded from `rd ready` and keeps
 /// downstream tasks blocked until a reviewer `accept`s it with `complete`'s
 /// usual effects, or `reject`s it back to `InProgress` for rework.
-pub fn submit(task_id: &TaskId, db: &mut Database) -> Result<Task> {
+pub fn submit(task_id: &TaskId, force: bool, db: &mut Database) -> Result<Task> {
     let task = db.get_task(task_id);
 
     if task.is_none() {
@@ -713,11 +816,10 @@ pub fn submit(task_id: &TaskId, db: &mut Database) -> Result<Task> {
 
     let task = task.unwrap();
 
-    if db.has_subtasks(task_id) {
-        return Err(anyhow!(
-            "Task {task_id} has subtasks and cannot be submitted directly. Submit its subtasks instead."
-        ));
+    if db.has_subtasks(task_id) && !force {
+        return Err(subtasks_block_err(task_id, "submit", true, db));
     }
+    let force_override = force && db.has_subtasks(task_id);
 
     if task.state() != TaskState::InProgress {
         return Err(anyhow!(
@@ -730,7 +832,10 @@ pub fn submit(task_id: &TaskId, db: &mut Database) -> Result<Task> {
     if !task.transition_from_any(&[TaskState::InProgress], TaskState::Verifying) {
         return Err(anyhow!("Failed to submit task: state may have changed"));
     }
-    let submitted_task = task.clone();
+    if force_override {
+        record_force_override(task_id, "submit", db)?;
+    }
+    let submitted_task = db.get_task(task_id).unwrap().clone();
     db.save_task(&submitted_task)?;
 
     if let Some(pid) = submitted_task.parent_id() {
@@ -745,7 +850,7 @@ pub fn submit(task_id: &TaskId, db: &mut Database) -> Result<Task> {
 /// (the assignee stays claimed, unlike `retry`, which requires a fresh
 /// `start`), increments the retry counter, and records the reviewer's
 /// reason as an attempt-numbered comment.
-pub fn reject(task_id: &TaskId, reason: String, db: &mut Database) -> Result<Task> {
+pub fn reject(task_id: &TaskId, reason: String, force: bool, db: &mut Database) -> Result<Task> {
     let task = db.get_task(task_id);
 
     if task.is_none() {
@@ -754,11 +859,10 @@ pub fn reject(task_id: &TaskId, reason: String, db: &mut Database) -> Result<Tas
 
     let task = task.unwrap();
 
-    if db.has_subtasks(task_id) {
-        return Err(anyhow!(
-            "Task {task_id} has subtasks and cannot be rejected directly. Reject its subtasks instead."
-        ));
+    if db.has_subtasks(task_id) && !force {
+        return Err(subtasks_block_err(task_id, "reject", true, db));
     }
+    let force_override = force && db.has_subtasks(task_id);
 
     if task.state() != TaskState::Verifying {
         return Err(anyhow!(
@@ -771,7 +875,10 @@ pub fn reject(task_id: &TaskId, reason: String, db: &mut Database) -> Result<Tas
     if !task.reject(&reason) {
         return Err(anyhow!("Failed to reject task: state may have changed"));
     }
-    let rejected_task = task.clone();
+    if force_override {
+        record_force_override(task_id, "reject", db)?;
+    }
+    let rejected_task = db.get_task(task_id).unwrap().clone();
     db.save_task(&rejected_task)?;
 
     if let Some(pid) = rejected_task.parent_id() {
@@ -783,16 +890,15 @@ pub fn reject(task_id: &TaskId, reason: String, db: &mut Database) -> Result<Tas
 }
 
 /// Clear a task's assignee, returning it to `Pending`.
-pub fn release(task_id: &TaskId, db: &mut Database) -> Result<Task> {
+pub fn release(task_id: &TaskId, force: bool, db: &mut Database) -> Result<Task> {
     if db.get_task(task_id).is_none() {
         return Err(task_not_found_err(task_id, db));
     }
 
-    if db.has_subtasks(task_id) {
-        return Err(anyhow!(
-            "Task {task_id} has subtasks and cannot be released directly. Release its subtasks instead."
-        ));
+    if db.has_subtasks(task_id) && !force {
+        return Err(subtasks_block_err(task_id, "release", true, db));
     }
+    let force_override = force && db.has_subtasks(task_id);
 
     let task = db.get_task_mut(task_id).unwrap();
     if !task.release() {
@@ -801,7 +907,10 @@ pub fn release(task_id: &TaskId, db: &mut Database) -> Result<Task> {
             task.state().as_ref()
         ));
     }
-    let released_task = task.clone();
+    if force_override {
+        record_force_override(task_id, "release", db)?;
+    }
+    let released_task = db.get_task(task_id).unwrap().clone();
     db.save_task(&released_task)?;
 
     if let Some(pid) = released_task.parent_id() {
@@ -887,23 +996,25 @@ fn cascade_cancel_downstream(
 /// If `cascade` is set, also cancels every downstream task reachable through
 /// `blocked_by` chains. Fails if the task has subtasks, or is already
 /// completed or cancelled.
+#[allow(clippy::too_many_arguments)]
 pub fn cancel(
     task_id: &TaskId,
     reason: Option<String>,
     author: &str,
     cascade: bool,
+    force: bool,
     db: &mut Database,
 ) -> Result<CancelResult> {
-    let task = db
-        .get_task(task_id)
+    db.get_task(task_id)
         .ok_or_else(|| task_not_found_err(task_id, db))?;
 
-    if db.has_subtasks(task_id) {
-        return Err(anyhow!(
-            "Task {task_id} has subtasks and cannot be cancelled directly. Cancel its subtasks instead."
-        ));
+    if db.has_subtasks(task_id) && !force {
+        return Err(subtasks_block_err(task_id, "cancel", true, db));
     }
+    let force_override = force && db.has_subtasks(task_id);
+    let override_text = force_override.then(|| force_override_comment_text(task_id, "cancel", db));
 
+    let task = db.get_task(task_id).unwrap();
     if task.state() == TaskState::Completed {
         return Err(anyhow!(
             "Cannot cancel a completed task. Completed work is history."
@@ -931,6 +1042,9 @@ pub fn cancel(
     };
     let comment = Comment::new(generate_id(), comment_text, Timestamp::now());
     task.add_comment(comment);
+    if let Some(text) = override_text {
+        task.add_comment(Comment::new(generate_id(), text, Timestamp::now()));
+    }
     let cancelled_task = task.clone();
     db.save_task(&cancelled_task)?;
 
@@ -1005,9 +1119,7 @@ pub fn delete(task_id: &TaskId, db: &mut Database) -> Result<Task> {
         .ok_or_else(|| task_not_found_err(task_id, db))?;
 
     if db.has_subtasks(task_id) {
-        return Err(anyhow!(
-            "Task {task_id} has subtasks. Delete its subtasks first."
-        ));
+        return Err(subtasks_block_err(task_id, "delete", false, db));
     }
 
     if task.state() != TaskState::Pending {
