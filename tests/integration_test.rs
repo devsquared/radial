@@ -255,6 +255,123 @@ fn test_task_state_transitions() {
 }
 
 #[test]
+fn test_task_review_flow() {
+    let env = TestEnv::new();
+    env.run(&["init"]).expect("Init failed");
+
+    let output = env
+        .run(&["goal", "create", "Review flow test"])
+        .expect("Create goal failed");
+    let goal_id = output
+        .lines()
+        .find(|line| line.contains("Created goal:"))
+        .and_then(|line| line.split_whitespace().nth(2))
+        .unwrap()
+        .to_string();
+
+    let output = env
+        .run(&[
+            "task",
+            "create",
+            &goal_id,
+            "Reviewed task",
+            "--receives",
+            "Input",
+            "--produces",
+            "Output",
+            "--verify",
+            "Check",
+        ])
+        .expect("Create task failed");
+    let task_id = output
+        .lines()
+        .find(|line| line.contains("Created task:"))
+        .and_then(|line| line.split_whitespace().nth(2))
+        .unwrap()
+        .to_string();
+
+    // A downstream task waits on the reviewed one.
+    let output = env
+        .run(&[
+            "task",
+            "create",
+            &goal_id,
+            "Downstream task",
+            "--receives",
+            "Output",
+            "--produces",
+            "Shipped",
+            "--verify",
+            "Shipped",
+            "--blocked-by",
+            &task_id,
+        ])
+        .expect("Create downstream task failed");
+    let downstream_id = output
+        .lines()
+        .find(|line| line.contains("Created task:"))
+        .and_then(|line| line.split_whitespace().nth(2))
+        .unwrap()
+        .to_string();
+
+    env.run(&["task", "start", &task_id, "--assignee", "test-agent"])
+        .expect("Start task failed");
+
+    // Submit for review: verifying, excluded from ready, downstream still blocked.
+    env.run(&["task", "submit", &task_id])
+        .expect("Submit task failed");
+    let output = env
+        .run(&["status", "--task", &task_id])
+        .expect("Status failed");
+    assert!(output.contains("verifying"));
+    let ready_output = env.run(&["ready", &goal_id]).expect("Ready failed");
+    assert!(ready_output.contains("No tasks ready"));
+
+    // Reject: back to in_progress (not pending), same assignee, reason recorded.
+    env.run(&[
+        "task",
+        "reject",
+        &task_id,
+        "--reason",
+        "Missing the empty-input case",
+    ])
+    .expect("Reject task failed");
+    let output = env
+        .run(&["status", "--task", &task_id])
+        .expect("Status failed");
+    assert!(output.contains("in_progress"));
+    let output = env.run(&["show", &task_id]).expect("Show task failed");
+    assert!(output.contains("Attempt 1 rejected: Missing the empty-input case"));
+
+    // Resubmit and accept: completed, with the same effects as `complete`.
+    env.run(&["task", "submit", &task_id])
+        .expect("Resubmit task failed");
+    let output = env
+        .run(&[
+            "task",
+            "accept",
+            &task_id,
+            "--result",
+            "Handles the empty-input case now",
+        ])
+        .expect("Accept task failed");
+    assert!(output.contains(&downstream_id));
+
+    let output = env
+        .run(&["status", "--task", &task_id])
+        .expect("Status failed");
+    assert!(output.contains("completed"));
+    let output = env.run(&["show", &task_id]).expect("Show task failed");
+    assert!(output.contains("Handles the empty-input case now"));
+
+    // Downstream task is unblocked now that the reviewed task is completed.
+    let output = env
+        .run(&["status", "--task", &downstream_id])
+        .expect("Status failed");
+    assert!(output.contains("pending"));
+}
+
+#[test]
 fn test_task_with_artifacts() {
     let env = TestEnv::new();
     env.run(&["init"]).expect("Init failed");
@@ -907,6 +1024,82 @@ fn test_json_output_edit_and_task_lifecycle_mutations() {
         .expect("Delete task --json failed");
     let deleted: Value = serde_json::from_str(&output).expect("Should be valid JSON");
     assert_eq!(deleted["id"], deletable_id);
+}
+
+#[test]
+fn test_json_output_task_review_flow() {
+    let env = TestEnv::new();
+    env.run(&["init"]).expect("Init failed");
+
+    let output = env
+        .run(&["goal", "create", "JSON review flow test"])
+        .expect("Create goal failed");
+    let goal_id = output
+        .lines()
+        .find(|line| line.contains("Created goal:"))
+        .and_then(|line| line.split_whitespace().nth(2))
+        .unwrap()
+        .to_string();
+
+    let output = env
+        .run(&[
+            "task",
+            "create",
+            &goal_id,
+            "JSON reviewed task",
+            "--receives",
+            "r",
+            "--produces",
+            "p",
+            "--verify",
+            "v",
+            "--json",
+        ])
+        .expect("Create task failed");
+    let task: Value = serde_json::from_str(&output).expect("Should be valid JSON");
+    let task_id = task["id"].as_str().unwrap().to_string();
+
+    env.run(&["task", "start", &task_id, "--assignee", "tester"])
+        .expect("Start task failed");
+
+    let output = env
+        .run(&["task", "submit", &task_id, "--json"])
+        .expect("Submit task --json failed");
+    let submitted: Value = serde_json::from_str(&output).expect("Should be valid JSON");
+    assert_eq!(submitted["state"], "verifying");
+    assert!(submitted["result"].is_null());
+
+    let output = env
+        .run(&[
+            "task",
+            "reject",
+            &task_id,
+            "--reason",
+            "needs more work",
+            "--json",
+        ])
+        .expect("Reject task --json failed");
+    let rejected: Value = serde_json::from_str(&output).expect("Should be valid JSON");
+    assert_eq!(rejected["state"], "inprogress");
+    assert_eq!(rejected["assignee"], "tester");
+
+    env.run(&["task", "submit", &task_id])
+        .expect("Resubmit task failed");
+
+    let output = env
+        .run(&[
+            "task",
+            "accept",
+            &task_id,
+            "--result",
+            "Looks good now",
+            "--json",
+        ])
+        .expect("Accept task --json failed");
+    let accepted: Value = serde_json::from_str(&output).expect("Should be valid JSON");
+    assert_eq!(accepted["task"]["state"], "completed");
+    assert_eq!(accepted["task"]["result"]["summary"], "Looks good now");
+    assert!(accepted["unblocked_task_ids"].is_array());
 }
 
 #[test]

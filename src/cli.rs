@@ -337,6 +337,56 @@ pub enum TaskCommands {
         json: bool,
     },
 
+    /// Submit an in-progress task for review (moves it to `verifying`)
+    Submit {
+        /// The task ID to submit
+        task_id: String,
+
+        /// Output as JSON
+        #[arg(long)]
+        json: bool,
+    },
+
+    /// Accept a task under review, completing it (`verifying` to `completed`)
+    Accept {
+        /// The task ID to accept
+        task_id: String,
+
+        /// Summary of what was accomplished
+        #[arg(long)]
+        result: String,
+
+        /// Artifact paths created (comma-separated)
+        #[arg(long, value_delimiter = ',')]
+        artifacts: Option<Vec<String>>,
+
+        /// Total tokens used for this task
+        #[arg(long)]
+        tokens: Option<i64>,
+
+        /// Elapsed time in milliseconds. Derived from the task's start time if omitted
+        #[arg(long)]
+        elapsed: Option<i64>,
+
+        /// Output as JSON
+        #[arg(long)]
+        json: bool,
+    },
+
+    /// Reject a task under review, sending it back for rework (`verifying` to `in_progress`)
+    Reject {
+        /// The task ID to reject
+        task_id: String,
+
+        /// Reason the task was rejected
+        #[arg(long)]
+        reason: String,
+
+        /// Output as JSON
+        #[arg(long)]
+        json: bool,
+    },
+
     /// Release a claimed task back to pending
     Release {
         /// The task ID to release (mutually exclusive with --stale and --all-in-progress)

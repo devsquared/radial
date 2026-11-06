@@ -75,7 +75,8 @@ impl TaskMetrics {
         self.elapsed_ms
     }
 
-    /// Number of times the task has been retried.
+    /// Number of rework attempts the task has needed, via either `retry`
+    /// (after a failure) or `reject` (after review).
     pub fn retry_count(&self) -> i64 {
         self.retry_count
     }
@@ -359,7 +360,7 @@ impl Task {
     }
 
     pub(crate) fn complete(&mut self, outcome: Outcome, metrics: TaskMetrics) -> bool {
-        if self.state != TaskState::InProgress {
+        if !matches!(self.state, TaskState::InProgress | TaskState::Verifying) {
             return false;
         }
         self.state = TaskState::Completed;
@@ -388,6 +389,24 @@ impl Task {
         }
         self.state = TaskState::Pending;
         self.started_at = None;
+        self.updated_at = Timestamp::now();
+        true
+    }
+
+    /// Reject a task under review: sends it back to `InProgress` for rework.
+    /// Unlike `retry`, the assignee stays claimed and no fresh `start` is
+    /// needed, since review only follows an active `InProgress` attempt.
+    /// Records the reviewer's reason as an attempt-numbered comment.
+    pub(crate) fn reject(&mut self, reason: &str) -> bool {
+        if self.state != TaskState::Verifying {
+            return false;
+        }
+        self.metrics.retry_count += 1;
+        let attempt = self.metrics.retry_count;
+        let text = format!("Attempt {attempt} rejected: {reason}");
+        self.comments
+            .push(Comment::new(generate_id(), text, Timestamp::now()));
+        self.state = TaskState::InProgress;
         self.updated_at = Timestamp::now();
         true
     }
@@ -546,8 +565,18 @@ mod tests {
         assert_eq!(task.metrics.retry_count, 1);
     }
 
-    // complete() is only valid from InProgress. Every other state should
-    // be rejected, leaving the task untouched.
+    // complete() is also valid from Verifying, for `accept`ing a task that
+    // was submitted for review.
+    #[rstest]
+    fn complete_succeeds_from_verifying(mut task: Task) {
+        task.state = TaskState::Verifying;
+        let outcome = Outcome::new("done".to_string(), Vec::new());
+        assert!(task.complete(outcome, TaskMetrics::default()));
+        assert_eq!(task.state, TaskState::Completed);
+    }
+
+    // complete() is only valid from InProgress or Verifying. Every other
+    // state should be rejected, leaving the task untouched.
     #[rstest]
     #[case::from_pending(TaskState::Pending)]
     #[case::from_blocked(TaskState::Blocked)]
@@ -612,6 +641,44 @@ mod tests {
         task.state = TaskState::Failed;
         assert!(task.retry());
         assert!(task.comments.is_empty());
+    }
+
+    // -- reject --
+
+    // Rejecting a task under review should send it back to InProgress
+    // (not Pending — it's still claimed) and bump the retry counter.
+    #[rstest]
+    fn reject_increments_and_transitions(mut task: Task) {
+        task.state = TaskState::Verifying;
+        task.metrics.retry_count = 1;
+        assert!(task.reject("missing edge case"));
+        assert_eq!(task.state, TaskState::InProgress);
+        assert_eq!(task.metrics.retry_count, 2);
+    }
+
+    // reject() is only valid from Verifying. Every other state should be rejected.
+    #[rstest]
+    #[case::from_pending(TaskState::Pending)]
+    #[case::from_in_progress(TaskState::InProgress)]
+    #[case::from_completed(TaskState::Completed)]
+    #[case::from_failed(TaskState::Failed)]
+    fn reject_rejects_non_verifying(mut task: Task, #[case] state: TaskState) {
+        task.state = state;
+        assert!(!task.reject("reason"));
+        assert_eq!(task.state, state);
+    }
+
+    // Rejecting should record the reviewer's reason as an attempt-numbered
+    // comment, since there's no prior result (submit sets none) to reuse.
+    #[rstest]
+    fn reject_records_reason_as_comment(mut task: Task) {
+        task.state = TaskState::Verifying;
+        assert!(task.reject("doesn't handle the empty-input case"));
+        assert_eq!(task.comments.len(), 1);
+        assert_eq!(
+            task.comments[0].text(),
+            "Attempt 1 rejected: doesn't handle the empty-input case"
+        );
     }
 
     // -- cancel --
