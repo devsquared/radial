@@ -690,7 +690,7 @@ fn status_goal(goal_status: &crate::ops::status::GoalStatus, opts: &RenderOption
     let desc_w = opts.desc_width(49);
     json_or(goal_status, opts, |w| {
         let goal = goal_status.goal();
-        let metrics = goal_status.metrics();
+        let metrics = goal_status.computed_metrics();
         let goal_ref = goal.display_ref().unwrap_or_else(|| goal.id().to_string());
 
         writeln!(
@@ -779,8 +779,8 @@ pub fn show(result: &ShowResult, opts: &RenderOptions) -> Result<()> {
         ShowResult::Goal {
             goal,
             tasks,
-            metrics,
-        } => show_goal(goal, tasks, metrics, opts),
+            computed_metrics,
+        } => show_goal(goal, tasks, computed_metrics, opts),
     }
 }
 
@@ -909,18 +909,20 @@ fn show_goal(
     metrics: &crate::models::Metrics,
     opts: &RenderOptions,
 ) -> Result<()> {
-    // Wrap in a struct for JSON serialization
+    // Wrap in a struct for JSON serialization. `computed_metrics` is named
+    // distinctly from the flattened `Goal`'s own persisted `metrics` field
+    // so the two don't collide under the same JSON key.
     #[derive(Serialize)]
     struct GoalDetail<'a> {
         #[serde(flatten)]
         goal: &'a Goal,
         tasks: &'a [Task],
-        metrics: &'a crate::models::Metrics,
+        computed_metrics: &'a crate::models::Metrics,
     }
     let detail = GoalDetail {
         goal,
         tasks,
-        metrics,
+        computed_metrics: metrics,
     };
 
     let desc_w = opts.desc_width(49);

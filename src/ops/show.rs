@@ -16,8 +16,10 @@ pub enum ShowResult {
         goal: Goal,
         /// The goal's tasks.
         tasks: Vec<Task>,
-        /// The goal's aggregate metrics.
-        metrics: Metrics,
+        /// The goal's freshly computed aggregate metrics. Named distinctly
+        /// from the flattened `Goal`'s own persisted `metrics` field so the
+        /// two don't collide under the same JSON key.
+        computed_metrics: Metrics,
     },
     /// A single task.
     Task(Task),
@@ -46,7 +48,7 @@ pub fn run(id: &str, db: &Database) -> Result<ShowResult> {
         return Ok(ShowResult::Goal {
             goal: goal.clone(),
             tasks,
-            metrics,
+            computed_metrics: metrics,
         });
     }
 

@@ -85,15 +85,12 @@ pub fn cancel(
         cancelled_task_ids.push(task_id.clone());
     }
 
-    // Recompute metrics to include cancelled count
-    let metrics = db.compute_goal_metrics(goal_id);
-
-    // Mark the goal as cancelled and update metrics
+    // Mark the goal as cancelled, then refresh metrics to include the
+    // cancelled count before persisting.
     let goal_mut = db.get_goal_mut(goal_id).unwrap();
     goal_mut.mark_cancelled();
-    goal_mut.set_metrics(metrics);
-    let cancelled_goal = goal_mut.clone();
-    db.save_goal(&cancelled_goal)?;
+    db.refresh_goal_metrics(goal_id)?;
+    let cancelled_goal = db.get_goal(goal_id).unwrap().clone();
 
     Ok(GoalCancelResult {
         goal: cancelled_goal,

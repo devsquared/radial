@@ -12,7 +12,9 @@ pub struct GoalStatus {
     #[serde(flatten)]
     goal: Goal,
     tasks: Vec<Task>,
-    metrics: Metrics,
+    /// Named distinctly from the flattened `Goal`'s own persisted `metrics`
+    /// field so the two don't collide under the same JSON key.
+    computed_metrics: Metrics,
 }
 
 impl GoalStatus {
@@ -26,9 +28,9 @@ impl GoalStatus {
         &self.tasks
     }
 
-    /// The goal's aggregate metrics.
-    pub fn metrics(&self) -> &Metrics {
-        &self.metrics
+    /// The goal's freshly computed aggregate metrics.
+    pub fn computed_metrics(&self) -> &Metrics {
+        &self.computed_metrics
     }
 }
 
@@ -104,7 +106,7 @@ fn get_goal(goal_id: &GoalId, assignee: Option<&str>, db: &Database) -> Result<G
     Ok(GoalStatus {
         goal,
         tasks,
-        metrics,
+        computed_metrics: metrics,
     })
 }
 

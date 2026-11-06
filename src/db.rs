@@ -632,6 +632,21 @@ impl Database {
         )
     }
 
+    /// Recompute a goal's metrics from its current tasks and persist the
+    /// result, keeping the on-disk `Goal.metrics` in sync with live task
+    /// state. `compute_goal_metrics` is the source of truth for display;
+    /// this is the one call site every task-mutating `ops` function should
+    /// go through so the persisted copy never goes stale.
+    pub fn refresh_goal_metrics(&mut self, goal_id: &GoalId) -> Result<()> {
+        let metrics = self.compute_goal_metrics(goal_id);
+        let goal = self
+            .get_goal_mut(goal_id)
+            .ok_or_else(|| anyhow!("Goal not found: {goal_id}"))?;
+        goal.set_metrics(metrics);
+        let goal = goal.clone();
+        self.save_goal(&goal)
+    }
+
     /// Resolve a goal ID from a prefix or full ID string.
     ///
     /// Tries in order:

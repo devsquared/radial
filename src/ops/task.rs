@@ -188,8 +188,7 @@ pub fn create(
     // Update the goal
     let goal = db.get_goal_mut(&goal_id_owned).unwrap();
     goal.touch();
-    let goal = goal.clone();
-    db.save_goal(&goal)?;
+    db.refresh_goal_metrics(&goal_id_owned)?;
 
     Ok(task)
 }
@@ -528,8 +527,7 @@ pub fn complete(
     } else {
         goal.touch();
     }
-    let goal = goal.clone();
-    db.save_goal(&goal)?;
+    db.refresh_goal_metrics(&goal_id)?;
 
     Ok(CompleteResult {
         task: completed_task,
@@ -599,6 +597,7 @@ pub fn fail(
     if let Some(pid) = failed_task.parent_id() {
         db.sync_parent_state(pid)?;
     }
+    db.refresh_goal_metrics(failed_task.goal_id())?;
 
     Ok(failed_task)
 }
@@ -637,6 +636,7 @@ pub fn retry(task_id: &TaskId, db: &mut Database) -> Result<Task> {
     if let Some(pid) = retried_task.parent_id() {
         db.sync_parent_state(pid)?;
     }
+    db.refresh_goal_metrics(retried_task.goal_id())?;
 
     Ok(retried_task)
 }
@@ -845,6 +845,8 @@ pub fn cancel(
         Vec::new()
     };
 
+    db.refresh_goal_metrics(&goal_id)?;
+
     Ok(CancelResult {
         task: cancelled_task,
         unblocked_task_ids,
@@ -908,6 +910,7 @@ pub fn delete(task_id: &TaskId, db: &mut Database) -> Result<Task> {
     if let Some(pid) = parent_id {
         db.sync_parent_state(&pid)?;
     }
+    db.refresh_goal_metrics(&goal_id)?;
 
     Ok(task)
 }
