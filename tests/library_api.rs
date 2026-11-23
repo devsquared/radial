@@ -4,6 +4,7 @@
 use radial::db::Database;
 use radial::models::{GoalState, Priority, TaskState};
 use radial::ops;
+use std::collections::BTreeMap;
 use std::fs;
 use tempfile::TempDir;
 
@@ -16,8 +17,12 @@ fn drives_a_goal_through_create_start_complete_via_ops() {
     let (mut db, _lock) =
         Database::open_for_write(&radial_dir).expect("failed to open database for write");
 
-    let goal = ops::goal::create("Ship the library seam".to_string(), &mut db)
-        .expect("failed to create goal");
+    let goal = ops::goal::create(
+        "Ship the library seam".to_string(),
+        BTreeMap::new(),
+        &mut db,
+    )
+    .expect("failed to create goal");
     assert_eq!(goal.state(), GoalState::Pending);
 
     let task = ops::task::create(
@@ -29,6 +34,7 @@ fn drives_a_goal_through_create_start_complete_via_ops() {
         Some("An integration test exercising ops directly".to_string()),
         Some("cargo nextest run --all-targets passes".to_string()),
         None,
+        BTreeMap::new(),
         &mut db,
     )
     .expect("failed to create task");
@@ -71,8 +77,8 @@ fn derives_elapsed_ms_from_started_at_when_not_supplied() {
     let (mut db, _lock) =
         Database::open_for_write(&radial_dir).expect("failed to open database for write");
 
-    let goal =
-        ops::goal::create("Time a task".to_string(), &mut db).expect("failed to create goal");
+    let goal = ops::goal::create("Time a task".to_string(), BTreeMap::new(), &mut db)
+        .expect("failed to create goal");
     let task = ops::task::create(
         goal.id(),
         "Do something measurable".to_string(),
@@ -82,6 +88,7 @@ fn derives_elapsed_ms_from_started_at_when_not_supplied() {
         Some("produces".to_string()),
         Some("verify".to_string()),
         None,
+        BTreeMap::new(),
         &mut db,
     )
     .expect("failed to create task");
@@ -119,8 +126,12 @@ fn explicit_elapsed_overrides_derivation_from_started_at() {
     let (mut db, _lock) =
         Database::open_for_write(&radial_dir).expect("failed to open database for write");
 
-    let goal = ops::goal::create("Time a task explicitly".to_string(), &mut db)
-        .expect("failed to create goal");
+    let goal = ops::goal::create(
+        "Time a task explicitly".to_string(),
+        BTreeMap::new(),
+        &mut db,
+    )
+    .expect("failed to create goal");
     let task = ops::task::create(
         goal.id(),
         "Do something with a known duration".to_string(),
@@ -130,6 +141,7 @@ fn explicit_elapsed_overrides_derivation_from_started_at() {
         Some("produces".to_string()),
         Some("verify".to_string()),
         None,
+        BTreeMap::new(),
         &mut db,
     )
     .expect("failed to create task");

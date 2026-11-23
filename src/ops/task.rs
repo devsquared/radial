@@ -1,4 +1,4 @@
-use std::collections::{HashSet, VecDeque};
+use std::collections::{BTreeMap, HashSet, VecDeque};
 
 use anyhow::{Result, anyhow};
 use jiff::{SignedDuration, Timestamp};
@@ -125,6 +125,7 @@ pub fn create(
     produces: Option<String>,
     verify: Option<String>,
     blocked_by: Option<Vec<TaskId>>,
+    tags: BTreeMap<String, String>,
     db: &mut Database,
 ) -> Result<Task> {
     let goal = db.get_goal(goal_id);
@@ -223,7 +224,7 @@ pub fn create(
     };
     let now = Timestamp::now();
     let seq = db.next_task_seq(&goal_id_owned);
-    let task = Task::new(
+    let mut task = Task::new(
         TaskId::new(),
         goal_id_owned.clone(),
         Some(seq),
@@ -236,6 +237,7 @@ pub fn create(
         now,
         now,
     );
+    task.merge_tags(tags);
 
     db.create_task(task.clone())?;
 
@@ -252,12 +254,13 @@ pub fn create(
     Ok(task)
 }
 
-/// List a goal's tasks, optionally filtered by priority and/or assignee,
-/// sorted by priority.
+/// List a goal's tasks, optionally filtered by priority, assignee, and/or
+/// tags, sorted by priority.
 pub fn list(
     goal_id: &GoalId,
     priority: Option<&Priority>,
     assignee: Option<&str>,
+    tag_filter: &BTreeMap<String, String>,
     db: &Database,
 ) -> Result<Vec<Task>> {
     db.get_goal(goal_id)
@@ -268,10 +271,35 @@ pub fn list(
         .into_iter()
         .filter(|t| priority.is_none_or(|p| t.priority() == *p))
         .filter(|t| assignee.is_none_or(|a| t.assignee() == Some(a)))
+        .filter(|t| tags_matching(t, tag_filter))
         .cloned()
         .collect();
     tasks.sort_by_key(Task::priority);
     Ok(tasks)
+}
+
+/// Upsert tags onto a task, overwriting any keys already present and
+/// leaving the rest of its tag set untouched.
+pub fn set_tags(
+    task_id: &TaskId,
+    tags: BTreeMap<String, String>,
+    db: &mut Database,
+) -> Result<Task> {
+    if db.get_task(task_id).is_none() {
+        return Err(task_not_found_err(task_id, db));
+    }
+
+    let task = db.get_task_mut(task_id).unwrap();
+    task.merge_tags(tags);
+    let task = task.clone();
+    db.save_task(&task)?;
+    Ok(task)
+}
+
+/// Whether a task's tags satisfy every key-value pair in `filter` (an empty
+/// filter matches everything).
+pub fn tags_matching(task: &Task, filter: &BTreeMap<String, String>) -> bool {
+    filter.iter().all(|(k, v)| task.tags().get(k) == Some(v))
 }
 
 /// Start a task: assign it and transition it to `InProgress`.

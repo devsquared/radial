@@ -4006,3 +4006,229 @@ fn test_goal_cancel_forces_past_parent_with_subtasks() {
     let json: Value = serde_json::from_str(&show).expect("Invalid JSON");
     assert_eq!(json["state"], "cancelled");
 }
+
+#[test]
+fn test_task_create_with_tags_and_edit_upserts() {
+    let env = TestEnv::new();
+    env.run(&["init"]).expect("Init failed");
+
+    let output = env
+        .run(&["goal", "create", "Tags test"])
+        .expect("Create goal failed");
+    let goal_id = extract_created_id(&output, "Created goal:");
+
+    let output = env
+        .run(&[
+            "task",
+            "create",
+            &goal_id,
+            "Tagged task",
+            "--tag",
+            "env=staging",
+            "--tag",
+            "owner=alice",
+        ])
+        .expect("Create task failed");
+    assert!(output.contains("env=staging"));
+    assert!(output.contains("owner=alice"));
+
+    let task_id = extract_created_id(&output, "Created task:");
+
+    let show = env
+        .run(&["show", &task_id, "--json"])
+        .expect("Show task failed");
+    let json: Value = serde_json::from_str(&show).expect("Invalid JSON");
+    assert_eq!(json["tags"]["env"], "staging");
+    assert_eq!(json["tags"]["owner"], "alice");
+
+    // Editing with --tag should overwrite the given key and leave others untouched.
+    env.run(&[
+        "edit",
+        "task",
+        &task_id,
+        "--description",
+        "Tagged task",
+        "--tag",
+        "env=prod",
+    ])
+    .expect("Edit task failed");
+
+    let show = env
+        .run(&["show", &task_id, "--json"])
+        .expect("Show task failed");
+    let json: Value = serde_json::from_str(&show).expect("Invalid JSON");
+    assert_eq!(json["tags"]["env"], "prod");
+    assert_eq!(json["tags"]["owner"], "alice");
+}
+
+#[test]
+fn test_goal_create_with_tags_and_edit_upserts() {
+    let env = TestEnv::new();
+    env.run(&["init"]).expect("Init failed");
+
+    let output = env
+        .run(&["goal", "create", "Tagged goal", "--tag", "team=platform"])
+        .expect("Create goal failed");
+    assert!(output.contains("team=platform"));
+    let goal_id = extract_created_id(&output, "Created goal:");
+
+    env.run(&[
+        "edit",
+        "goal",
+        &goal_id,
+        "--description",
+        "Tagged goal",
+        "--tag",
+        "team=core",
+    ])
+    .expect("Edit goal failed");
+
+    let show = env
+        .run(&["show", &goal_id, "--json"])
+        .expect("Show goal failed");
+    let json: Value = serde_json::from_str(&show).expect("Invalid JSON");
+    assert_eq!(json["tags"]["team"], "core");
+}
+
+#[test]
+fn test_tag_rejects_missing_equals() {
+    let env = TestEnv::new();
+    env.run(&["init"]).expect("Init failed");
+
+    let output = env
+        .run(&["goal", "create", "Bad tag test"])
+        .expect("Create goal failed");
+    let goal_id = extract_created_id(&output, "Created goal:");
+
+    let err = env
+        .run(&[
+            "task",
+            "create",
+            &goal_id,
+            "Task",
+            "--tag",
+            "no-equals-sign",
+        ])
+        .expect_err("task create should reject a malformed --tag");
+    assert!(err.contains("Invalid tag"), "unexpected error: {err}");
+}
+
+#[test]
+fn test_task_list_filter_by_tag() {
+    let env = TestEnv::new();
+    env.run(&["init"]).expect("Init failed");
+
+    let output = env
+        .run(&["goal", "create", "Tag filter test"])
+        .expect("Create goal failed");
+    let goal_id = extract_created_id(&output, "Created goal:");
+
+    env.run(&["task", "create", &goal_id, "Task A", "--tag", "env=prod"])
+        .expect("Create task A failed");
+    env.run(&["task", "create", &goal_id, "Task B", "--tag", "env=staging"])
+        .expect("Create task B failed");
+
+    let output = env
+        .run(&["task", "list", &goal_id, "--tag-filter", "env=prod"])
+        .expect("List filtered failed");
+    assert!(output.contains("Task A"));
+    assert!(!output.contains("Task B"));
+
+    let output = env
+        .run(&["task", "list", &goal_id])
+        .expect("List all failed");
+    assert!(output.contains("Task A"));
+    assert!(output.contains("Task B"));
+}
+
+#[test]
+fn test_ready_filter_by_tag() {
+    let env = TestEnv::new();
+    env.run(&["init"]).expect("Init failed");
+
+    let output = env
+        .run(&["goal", "create", "Ready tag filter test"])
+        .expect("Create goal failed");
+    let goal_id = extract_created_id(&output, "Created goal:");
+
+    env.run(&[
+        "task",
+        "create",
+        &goal_id,
+        "Task A",
+        "--receives",
+        "In",
+        "--produces",
+        "Out",
+        "--verify",
+        "Check",
+        "--tag",
+        "env=prod",
+    ])
+    .expect("Create task A failed");
+    env.run(&[
+        "task",
+        "create",
+        &goal_id,
+        "Task B",
+        "--receives",
+        "In",
+        "--produces",
+        "Out",
+        "--verify",
+        "Check",
+        "--tag",
+        "env=staging",
+    ])
+    .expect("Create task B failed");
+
+    let output = env
+        .run(&["ready", &goal_id, "--tag-filter", "env=prod"])
+        .expect("Ready filtered failed");
+    assert!(output.contains("Task A"));
+    assert!(!output.contains("Task B"));
+}
+
+#[test]
+fn test_status_filter_by_tag() {
+    let env = TestEnv::new();
+    env.run(&["init"]).expect("Init failed");
+
+    let output = env
+        .run(&["goal", "create", "Status tag filter test"])
+        .expect("Create goal failed");
+    let goal_id = extract_created_id(&output, "Created goal:");
+
+    env.run(&["task", "create", &goal_id, "Task A", "--tag", "env=prod"])
+        .expect("Create task A failed");
+    env.run(&["task", "create", &goal_id, "Task B", "--tag", "env=staging"])
+        .expect("Create task B failed");
+
+    let output = env
+        .run(&["status", "--goal", &goal_id, "--tag-filter", "env=prod"])
+        .expect("Status filtered failed");
+    assert!(output.contains("Task A"));
+    assert!(!output.contains("Task B"));
+}
+
+#[test]
+fn test_list_filter_by_tag() {
+    let env = TestEnv::new();
+    env.run(&["init"]).expect("Init failed");
+
+    let output = env
+        .run(&["goal", "create", "List tag filter test"])
+        .expect("Create goal failed");
+    let goal_id = extract_created_id(&output, "Created goal:");
+
+    env.run(&["task", "create", &goal_id, "Task A", "--tag", "env=prod"])
+        .expect("Create task A failed");
+    env.run(&["task", "create", &goal_id, "Task B", "--tag", "env=staging"])
+        .expect("Create task B failed");
+
+    let output = env
+        .run(&["list", "--tag-filter", "env=prod"])
+        .expect("List filtered failed");
+    assert!(output.contains("Task A"));
+    assert!(!output.contains("Task B"));
+}

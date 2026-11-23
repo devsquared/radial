@@ -1,10 +1,11 @@
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 
 use anyhow::Result;
 
 use crate::db::Database;
 use crate::id::TaskId;
 use crate::models::{Goal, Metrics, Task};
+use crate::ops::task::tags_matching;
 
 /// A goal with its tasks in topological (dependency) order and its metrics.
 pub struct GoalWithTasks {
@@ -16,13 +17,17 @@ pub struct GoalWithTasks {
     pub metrics: Metrics,
 }
 
-/// List every non-archived goal with its tasks in dependency order.
-pub fn run(db: &Database) -> Result<Vec<GoalWithTasks>> {
+/// List every non-archived goal with its tasks in dependency order,
+/// optionally restricting each goal's tasks to those matching `tag_filter`.
+pub fn run(tag_filter: &BTreeMap<String, String>, db: &Database) -> Result<Vec<GoalWithTasks>> {
     let results = db
         .list_goals()
         .into_iter()
         .map(|goal| {
-            let tasks = topo_sort(db.list_tasks(goal.id()));
+            let tasks = topo_sort(db.list_tasks(goal.id()))
+                .into_iter()
+                .filter(|t| tags_matching(t, tag_filter))
+                .collect();
             let metrics = db.compute_goal_metrics(goal.id());
             GoalWithTasks {
                 goal: goal.clone(),

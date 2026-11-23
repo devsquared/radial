@@ -1,3 +1,5 @@
+use std::collections::BTreeMap;
+
 use jiff::Timestamp;
 use serde::{Deserialize, Serialize};
 use strum::{AsRefStr, EnumString};
@@ -123,6 +125,8 @@ pub struct Task {
     compacted: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     summary: Option<String>,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    tags: BTreeMap<String, String>,
 }
 
 impl Task {
@@ -161,6 +165,7 @@ impl Task {
             comments: Vec::new(),
             compacted: false,
             summary: None,
+            tags: BTreeMap::new(),
         }
     }
 
@@ -270,6 +275,18 @@ impl Task {
     /// The task's compaction summary, if it has been compacted.
     pub fn summary(&self) -> Option<&str> {
         self.summary.as_deref()
+    }
+
+    /// Arbitrary key-value labels attached to the task.
+    pub fn tags(&self) -> &BTreeMap<String, String> {
+        &self.tags
+    }
+
+    /// Upsert the given tags into the task's existing tag set, overwriting
+    /// any keys already present and leaving the rest untouched.
+    pub(crate) fn merge_tags(&mut self, tags: BTreeMap<String, String>) {
+        self.tags.extend(tags);
+        self.updated_at = Timestamp::now();
     }
 
     /// Compact this task by replacing heavy fields with a summary.
@@ -479,6 +496,7 @@ mod tests {
             comments: Vec::new(),
             compacted: false,
             summary: None,
+            tags: BTreeMap::new(),
         }
     }
 
@@ -912,5 +930,54 @@ mod tests {
     fn display_ref_without_seq() {
         let task = task();
         assert_eq!(task.display_ref(5), None);
+    }
+
+    // -- tags --
+
+    // Merging tags into an empty set should add every pair.
+    #[rstest]
+    fn merge_tags_adds_new_keys(mut task: Task) {
+        let mut tags = BTreeMap::new();
+        tags.insert("env".to_string(), "prod".to_string());
+        task.merge_tags(tags);
+        assert_eq!(task.tags().get("env"), Some(&"prod".to_string()));
+    }
+
+    // Merging should overwrite existing keys but leave untouched keys alone.
+    #[rstest]
+    fn merge_tags_overwrites_existing_keys_only(mut task: Task) {
+        let mut initial = BTreeMap::new();
+        initial.insert("env".to_string(), "staging".to_string());
+        initial.insert("owner".to_string(), "alice".to_string());
+        task.merge_tags(initial);
+
+        let mut update = BTreeMap::new();
+        update.insert("env".to_string(), "prod".to_string());
+        task.merge_tags(update);
+
+        assert_eq!(task.tags().get("env"), Some(&"prod".to_string()));
+        assert_eq!(task.tags().get("owner"), Some(&"alice".to_string()));
+    }
+
+    // Tasks persisted before tags existed must still parse, with an empty tag set.
+    #[test]
+    fn task_parses_without_tags_field() {
+        let legacy = r#"
+id = "t_abc123"
+goal_id = "g_xyz789"
+description = "legacy task"
+priority = "p2"
+state = "pending"
+created_at = "2026-04-05T19:03:40.353107Z"
+updated_at = "2026-04-05T19:03:40.353107Z"
+
+[metrics]
+tokens = 0
+elapsed_ms = 0
+retry_count = 0
+"#;
+        let task: Task = toml::from_str(legacy).expect("legacy task should parse");
+        assert_eq!(task.description(), "legacy task");
+        assert!(task.tags().is_empty());
     }
 }

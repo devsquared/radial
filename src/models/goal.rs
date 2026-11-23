@@ -1,3 +1,5 @@
+use std::collections::BTreeMap;
+
 use jiff::Timestamp;
 use serde::{Deserialize, Serialize};
 use strum::{AsRefStr, EnumString};
@@ -122,6 +124,8 @@ pub struct Goal {
     #[serde(skip_serializing_if = "Option::is_none")]
     completed_at: Option<Timestamp>,
     metrics: Metrics,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    tags: BTreeMap<String, String>,
 }
 
 impl Goal {
@@ -147,6 +151,7 @@ impl Goal {
             updated_at,
             completed_at,
             metrics,
+            tags: BTreeMap::new(),
         }
     }
 
@@ -197,8 +202,20 @@ impl Goal {
         &self.metrics
     }
 
+    /// Arbitrary key-value labels attached to the goal.
+    pub fn tags(&self) -> &BTreeMap<String, String> {
+        &self.tags
+    }
+
     pub(crate) fn set_metrics(&mut self, metrics: Metrics) {
         self.metrics = metrics;
+    }
+
+    /// Upsert the given tags into the goal's existing tag set, overwriting
+    /// any keys already present and leaving the rest untouched.
+    pub(crate) fn merge_tags(&mut self, tags: BTreeMap<String, String>) {
+        self.tags.extend(tags);
+        self.updated_at = Timestamp::now();
     }
 
     pub(crate) fn set_description(&mut self, description: String) {
@@ -315,5 +332,53 @@ tasks_failed = 0
         let goal: Goal = toml::from_str(legacy).expect("legacy goal should parse");
         assert_eq!(goal.description(), "legacy goal");
         assert_eq!(goal.metrics().tasks_cancelled(), 0);
+        assert!(goal.tags().is_empty());
+    }
+
+    // -- tags --
+
+    // Merging tags into an empty set should add every pair.
+    #[test]
+    fn merge_tags_adds_new_keys() {
+        let mut goal = Goal::new(
+            GoalId::new_unchecked("test123".to_string()),
+            Some(1),
+            "Test goal".to_string(),
+            GoalState::Pending,
+            Timestamp::now(),
+            Timestamp::now(),
+            None,
+            Metrics::default(),
+        );
+        let mut tags = BTreeMap::new();
+        tags.insert("env".to_string(), "prod".to_string());
+        goal.merge_tags(tags);
+        assert_eq!(goal.tags().get("env"), Some(&"prod".to_string()));
+    }
+
+    // Merging should overwrite existing keys but leave untouched keys alone.
+    #[test]
+    fn merge_tags_overwrites_existing_keys_only() {
+        let mut goal = Goal::new(
+            GoalId::new_unchecked("test123".to_string()),
+            Some(1),
+            "Test goal".to_string(),
+            GoalState::Pending,
+            Timestamp::now(),
+            Timestamp::now(),
+            None,
+            Metrics::default(),
+        );
+        let mut initial = BTreeMap::new();
+        initial.insert("env".to_string(), "staging".to_string());
+        initial.insert("owner".to_string(), "alice".to_string());
+        goal.merge_tags(initial);
+
+        let mut update = BTreeMap::new();
+        update.insert("env".to_string(), "prod".to_string());
+        goal.merge_tags(update);
+
+        assert_eq!(goal.tags().get("env"), Some(&"prod".to_string()));
+        assert_eq!(goal.tags().get("owner"), Some(&"alice".to_string()));
     }
 }

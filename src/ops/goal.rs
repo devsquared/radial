@@ -1,3 +1,5 @@
+use std::collections::BTreeMap;
+
 use anyhow::{Result, anyhow};
 use jiff::Timestamp;
 use serde::Serialize;
@@ -18,10 +20,14 @@ pub struct GoalCancelResult {
 }
 
 /// Create a new goal with the next sequence number.
-pub fn create(description: String, db: &mut Database) -> Result<Goal> {
+pub fn create(
+    description: String,
+    tags: BTreeMap<String, String>,
+    db: &mut Database,
+) -> Result<Goal> {
     let now = Timestamp::now();
     let seq = db.next_goal_seq();
-    let goal = Goal::new(
+    let mut goal = Goal::new(
         GoalId::new(),
         Some(seq),
         description,
@@ -31,9 +37,32 @@ pub fn create(description: String, db: &mut Database) -> Result<Goal> {
         None,
         Metrics::default(),
     );
+    goal.merge_tags(tags);
 
     db.create_goal(goal.clone())?;
     Ok(goal)
+}
+
+/// Upsert tags onto a goal, overwriting any keys already present and
+/// leaving the rest of its tag set untouched.
+pub fn set_tags(
+    goal_id: &GoalId,
+    tags: BTreeMap<String, String>,
+    db: &mut Database,
+) -> Result<Goal> {
+    let goal = db
+        .get_goal_mut(goal_id)
+        .ok_or_else(|| anyhow!("Goal not found: {goal_id}"))?;
+    goal.merge_tags(tags);
+    let goal = goal.clone();
+    db.save_goal(&goal)?;
+    Ok(goal)
+}
+
+/// Whether a goal's tags satisfy every key-value pair in `filter` (an empty
+/// filter matches everything).
+pub fn tags_matching(goal: &Goal, filter: &BTreeMap<String, String>) -> bool {
+    filter.iter().all(|(k, v)| goal.tags().get(k) == Some(v))
 }
 
 /// List every non-archived goal.
