@@ -351,7 +351,7 @@ pub fn start(task_id: &TaskId, assignee: &str, force: bool, db: &mut Database) -
         let inherited_line = if inherited.is_empty() {
             String::new()
         } else {
-            let pid = task.parent_id().map(AsRef::as_ref).unwrap_or_default();
+            let pid = task.parent_id().map_or_default(AsRef::as_ref);
             format!(
                 "Task inherits unfinished blocker(s) from parent {pid}: {}\n",
                 inherited.join(", ")
