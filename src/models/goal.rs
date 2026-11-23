@@ -8,13 +8,14 @@ use crate::id::GoalId;
 
 /// The lifecycle state of a [`Goal`], derived from the state of its tasks.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, AsRefStr, EnumString)]
-#[serde(rename_all = "lowercase")]
+#[serde(rename_all = "snake_case")]
 #[strum(serialize_all = "snake_case")]
 #[non_exhaustive]
 pub enum GoalState {
     /// No task under the goal has started.
     Pending,
     /// At least one task under the goal has started.
+    #[serde(alias = "inprogress")]
     InProgress,
     /// Every task under the goal completed successfully.
     Completed,
@@ -333,6 +334,30 @@ tasks_failed = 0
         assert_eq!(goal.description(), "legacy goal");
         assert_eq!(goal.metrics().tasks_cancelled(), 0);
         assert!(goal.tags().is_empty());
+    }
+
+    // A freshly saved InProgress goal must serialize to the canonical
+    // "in_progress" spelling, not the legacy "inprogress" the alias above
+    // still accepts on read.
+    #[test]
+    fn goal_in_progress_round_trips_to_canonical_spelling() {
+        let mut goal = Goal::new(
+            GoalId::new_unchecked("test123".to_string()),
+            Some(1),
+            "Test goal".to_string(),
+            GoalState::Pending,
+            Timestamp::now(),
+            Timestamp::now(),
+            None,
+            Metrics::default(),
+        );
+        goal.mark_in_progress();
+
+        let serialized = toml::to_string(&goal).expect("goal should serialize");
+        assert!(serialized.contains(r#"state = "in_progress""#));
+
+        let round_tripped: Goal = toml::from_str(&serialized).expect("goal should re-parse");
+        assert_eq!(round_tripped.state(), GoalState::InProgress);
     }
 
     // -- tags --
