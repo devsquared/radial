@@ -889,7 +889,7 @@ fn test_json_output_task_start_and_complete() {
         .run(&["task", "start", task_id, "--assignee", "tester", "--json"])
         .expect("Start task --json failed");
     let started: Value = serde_json::from_str(&output).expect("Should be valid JSON");
-    assert_eq!(started["state"], "inprogress");
+    assert_eq!(started["state"], "in_progress");
     assert_eq!(started["assignee"], "tester");
 
     let output = env
@@ -1080,7 +1080,7 @@ fn test_json_output_task_review_flow() {
         ])
         .expect("Reject task --json failed");
     let rejected: Value = serde_json::from_str(&output).expect("Should be valid JSON");
-    assert_eq!(rejected["state"], "inprogress");
+    assert_eq!(rejected["state"], "in_progress");
     assert_eq!(rejected["assignee"], "tester");
 
     env.run(&["task", "submit", &task_id])
@@ -2544,7 +2544,7 @@ fn test_goal_stays_pending_until_task_start() {
         .expect("Goal list --json failed");
     let goals: Value = serde_json::from_str(&output).unwrap();
     assert_eq!(
-        goals[0]["state"], "inprogress",
+        goals[0]["state"], "in_progress",
         "Goal must be in_progress after first task start"
     );
 }

@@ -11,7 +11,7 @@ use crate::id::{GoalId, TaskId, generate_id};
 #[derive(
     Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord, AsRefStr, EnumString,
 )]
-#[serde(rename_all = "lowercase")]
+#[serde(rename_all = "snake_case")]
 #[strum(serialize_all = "lowercase")]
 #[derive(Default)]
 #[non_exhaustive]
@@ -29,7 +29,7 @@ pub enum Priority {
 
 /// The lifecycle state of a [`Task`].
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, AsRefStr, EnumString)]
-#[serde(rename_all = "lowercase")]
+#[serde(rename_all = "snake_case")]
 #[strum(serialize_all = "snake_case")]
 #[non_exhaustive]
 pub enum TaskState {
@@ -38,6 +38,7 @@ pub enum TaskState {
     /// Waiting on one or more other tasks in `blocked_by`.
     Blocked,
     /// Started and being worked on.
+    #[serde(alias = "inprogress")]
     InProgress,
     /// Work is done and awaiting verification against its contract.
     Verifying,
@@ -979,5 +980,41 @@ retry_count = 0
         let task: Task = toml::from_str(legacy).expect("legacy task should parse");
         assert_eq!(task.description(), "legacy task");
         assert!(task.tags().is_empty());
+    }
+
+    // Tasks persisted with the pre-rename "inprogress" spelling must still
+    // parse, via the alias on TaskState::InProgress.
+    #[test]
+    fn task_parses_with_legacy_inprogress_spelling() {
+        let legacy = r#"
+id = "t_abc123"
+goal_id = "g_xyz789"
+description = "legacy task"
+priority = "p2"
+state = "inprogress"
+created_at = "2026-04-05T19:03:40.353107Z"
+updated_at = "2026-04-05T19:03:40.353107Z"
+
+[metrics]
+tokens = 0
+elapsed_ms = 0
+retry_count = 0
+"#;
+        let task: Task = toml::from_str(legacy).expect("legacy task should parse");
+        assert_eq!(task.state(), TaskState::InProgress);
+    }
+
+    // A freshly saved InProgress task must serialize to the canonical
+    // "in_progress" spelling, not the legacy "inprogress" the alias above
+    // still accepts on read.
+    #[rstest]
+    fn task_in_progress_round_trips_to_canonical_spelling(mut task: Task) {
+        task.state = TaskState::InProgress;
+
+        let serialized = toml::to_string(&task).expect("task should serialize");
+        assert!(serialized.contains(r#"state = "in_progress""#));
+
+        let round_tripped: Task = toml::from_str(&serialized).expect("task should re-parse");
+        assert_eq!(round_tripped.state(), TaskState::InProgress);
     }
 }
