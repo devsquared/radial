@@ -15,6 +15,7 @@ use crate::ops::list::GoalWithTasks;
 use crate::ops::show::ShowResult;
 use crate::ops::status::{GoalSummary, StatusResult};
 use crate::ops::task::{CancelResult, CompleteResult};
+use crate::ops::verify::VerifyResult;
 
 /// Options that control how output is rendered.
 pub struct RenderOptions {
@@ -553,6 +554,53 @@ pub fn task_completed(result: &CompleteResult, opts: &RenderOptions) -> Result<(
     })
 }
 
+pub fn task_verified(task_id: &TaskId, result: &VerifyResult, opts: &RenderOptions) -> Result<()> {
+    #[derive(Serialize)]
+    struct Output<'a> {
+        task_id: &'a TaskId,
+        #[serde(flatten)]
+        result: &'a VerifyResult,
+    }
+
+    json_or(&Output { task_id, result }, opts, |w| {
+        if result.passed {
+            writeln!(
+                w,
+                "{} {} ({}ms)",
+                style("Verify passed:").green(),
+                style(task_id).cyan().bold(),
+                result.duration_ms
+            )?;
+        } else if result.timed_out {
+            writeln!(
+                w,
+                "{} {} (timed out after {}ms)",
+                style("Verify timed out:").red(),
+                style(task_id).cyan().bold(),
+                result.duration_ms
+            )?;
+        } else {
+            writeln!(
+                w,
+                "{} {} (exit {}, {}ms)",
+                style("Verify failed:").red(),
+                style(task_id).cyan().bold(),
+                result
+                    .exit_code
+                    .map_or_else(|| "none".to_string(), |c| c.to_string()),
+                result.duration_ms
+            )?;
+        }
+        if !result.stdout_tail.is_empty() {
+            writeln!(w, "{}\n{}", style("stdout:").dim(), result.stdout_tail)?;
+        }
+        if !result.stderr_tail.is_empty() {
+            writeln!(w, "{}\n{}", style("stderr:").dim(), result.stderr_tail)?;
+        }
+        Ok(())
+    })
+}
+
 pub fn task_failed(task: &Task, opts: &RenderOptions) -> Result<()> {
     json_or(task, opts, |w| {
         writeln!(
@@ -926,6 +974,9 @@ fn show_task(task: &Task, opts: &RenderOptions) -> Result<()> {
                 field(w, "  Receives", contract.receives())?;
                 field(w, "  Produces", contract.produces())?;
                 field(w, "  Verify", contract.verify())?;
+                if let Some(cmd) = contract.verify_cmd() {
+                    field(w, "  Verify cmd", cmd)?;
+                }
             }
             None => {
                 writeln!(
@@ -1133,6 +1184,9 @@ pub fn ready_tasks(
                 writeln!(w, "    Receives: {}", contract.receives())?;
                 writeln!(w, "    Produces: {}", contract.produces())?;
                 writeln!(w, "    Verify:   {}", contract.verify())?;
+                if let Some(cmd) = contract.verify_cmd() {
+                    writeln!(w, "    Verify cmd: {cmd}")?;
+                }
             }
             writeln!(w)?;
         }

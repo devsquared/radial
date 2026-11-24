@@ -34,6 +34,7 @@ fn drives_a_goal_through_create_start_complete_via_ops() {
         Some("An integration test exercising ops directly".to_string()),
         Some("cargo nextest run --all-targets passes".to_string()),
         None,
+        None,
         BTreeMap::new(),
         &mut db,
     )
@@ -88,6 +89,7 @@ fn derives_elapsed_ms_from_started_at_when_not_supplied() {
         Some("produces".to_string()),
         Some("verify".to_string()),
         None,
+        None,
         BTreeMap::new(),
         &mut db,
     )
@@ -140,6 +142,7 @@ fn explicit_elapsed_overrides_derivation_from_started_at() {
         Some("receives".to_string()),
         Some("produces".to_string()),
         Some("verify".to_string()),
+        None,
         None,
         BTreeMap::new(),
         &mut db,

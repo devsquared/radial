@@ -13,7 +13,7 @@ pub enum ShowResult {
     Goal {
         /// The goal.
         #[serde(flatten)]
-        goal: Goal,
+        goal: Box<Goal>,
         /// The goal's tasks.
         tasks: Vec<Task>,
         /// The goal's freshly computed aggregate metrics. Named distinctly
@@ -22,7 +22,7 @@ pub enum ShowResult {
         computed_metrics: Metrics,
     },
     /// A single task.
-    Task(Task),
+    Task(Box<Task>),
 }
 
 /// Resolve an ID (task or goal, by prefix or full ID) and return its full
@@ -34,7 +34,7 @@ pub fn run(id: &str, db: &Database) -> Result<ShowResult> {
         .ok()
         .and_then(|tid| db.get_task(&tid))
     {
-        return Ok(ShowResult::Task(task.clone()));
+        return Ok(ShowResult::Task(Box::new(task.clone())));
     }
 
     if let Some(goal_and_id) = db
@@ -46,7 +46,7 @@ pub fn run(id: &str, db: &Database) -> Result<ShowResult> {
         let tasks: Vec<Task> = db.list_tasks(&goal_id).into_iter().cloned().collect();
         let metrics = db.compute_goal_metrics(&goal_id);
         return Ok(ShowResult::Goal {
-            goal: goal.clone(),
+            goal: Box::new(goal.clone()),
             tasks,
             computed_metrics: metrics,
         });

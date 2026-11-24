@@ -121,7 +121,7 @@ walkthrough aimed at agents. Almost every command also accepts `--json` for mach
 
 | Command | Description |
 |---------|-------------|
-| `rd task create <goal-id> <description> [--priority p0-p3] [--parent <task-id>] [--receives ... --produces ... --verify ...] [--blocked-by <ids>] [--tag key=value]` | Create a task, optionally as a subtask, with a contract, dependencies, and/or tags (`--tag` is repeatable) |
+| `rd task create <goal-id> <description> [--priority p0-p3] [--parent <task-id>] [--receives ... --produces ... --verify ... --verify-cmd <cmd>] [--blocked-by <ids>] [--tag key=value]` | Create a task, optionally as a subtask, with a contract, dependencies, and/or tags (`--tag` is repeatable). `--verify-cmd` is an executable check `rd task verify`/`rd task complete` can run, alongside the prose `--verify` |
 | `rd task list [<goal-id>] [--priority] [--assignee] [--tag-filter key=value] [--verbose] [--full]` | List tasks for a goal, optionally filtered by tag (`--tag-filter` is repeatable; all must match). The goal ID can be omitted if you have exactly one active goal |
 | `rd task comment <task-id> <text>` | Add a timestamped comment to a task |
 | `rd task comments <task-id>` | View all comments on a task, untruncated |
@@ -131,7 +131,8 @@ walkthrough aimed at agents. Almost every command also accepts `--json` for mach
 | Command | Description |
 |---------|-------------|
 | `rd task start <task-id> --assignee <name> [--force]` | Claim and start a task (atomic). `--assignee` is required; `--force` overrides a `blocked` state |
-| `rd task complete <task-id> --result <summary> [--artifacts <paths>] [--tokens <n>] [--elapsed <ms>]` | Mark a task complete. If `--elapsed` is omitted, it's derived from how long the task was in progress |
+| `rd task complete <task-id> --result <summary> [--artifacts <paths>] [--tokens <n>] [--elapsed <ms>] [--skip-verify]` | Mark a task complete. If the contract has a `verify_cmd`, it's run first and completion is refused on a nonzero exit or timeout (the output tail is recorded as a comment); `--skip-verify` bypasses this once. If `--elapsed` is omitted, it's derived from how long the task was in progress |
+| `rd task verify <task-id>` | Advisory dry run of the contract's `verify_cmd`; reports pass/fail, exit code, output tails, and duration without completing or changing the task |
 | `rd task fail <task-id> [--reason <text>] [--compact]` | Mark a task as failed |
 | `rd task cancel <task-id> [--reason <text>] [--cascade]` | Cancel a task that's no longer needed. `--cascade` also cancels its downstream dependents |
 | `rd task retry <task-id>` | Retry a failed task; moves it to `pending` (not `in_progress`) and records the prior result as a comment |
@@ -148,7 +149,7 @@ walkthrough aimed at agents. Almost every command also accepts `--json` for mach
 | Command | Description |
 |---------|-------------|
 | `rd edit goal <goal-id> --description <text> [--tag key=value]` | Update a goal's description and/or upsert tags onto it (`--tag` is repeatable) |
-| `rd edit task <task-id> [--description] [--priority] [--receives --produces --verify] [--add-blocked-by \| --remove-blocked-by \| --set-blocked-by] [--tag key=value]` | Update a task's description, priority, contract, dependencies, and/or tags (`--tag` upserts, is repeatable) |
+| `rd edit task <task-id> [--description] [--priority] [--receives --produces --verify] [--verify-cmd <cmd> \| --clear-verify-cmd] [--add-blocked-by \| --remove-blocked-by \| --set-blocked-by] [--tag key=value]` | Update a task's description, priority, contract, dependencies, and/or tags (`--tag` upserts, is repeatable). Setting, changing, or clearing `--verify-cmd` records the change as a comment |
 
 #### Viewing and status
 
@@ -181,11 +182,14 @@ walkthrough aimed at agents. Almost every command also accepts `--json` for mach
 
 ### Contracts
 
-A contract has three parts:
+A contract has three required parts, plus one optional one:
 
 - **receives** — what this task gets as input (files, state, context)
 - **produces** — what this task must output
-- **verify** — how to confirm success (command to run, condition to check)
+- **verify** — how to confirm success, in prose (command to run, condition to check)
+- **verify_cmd** (optional) — that check's executable form. If set, `rd task verify` can run it as
+  an advisory dry run, and `rd task complete` runs it automatically, refusing to complete on a
+  nonzero exit or timeout unless `--skip-verify` is passed
 
 A contract is required before a task can be started. Set it at creation time, or add it later with `rd edit task`:
 
@@ -197,7 +201,8 @@ rd task create $GOAL "Set up database"
 rd edit task <task-id> \
   --receives "Express app with user routes" \
   --produces "PostgreSQL schema, db.js connection pool, migrated tables" \
-  --verify "psql -c 'SELECT * FROM users' succeeds"
+  --verify "psql -c 'SELECT * FROM users' succeeds" \
+  --verify-cmd "psql -c 'SELECT * FROM users'"
 ```
 
 ### Subtasks

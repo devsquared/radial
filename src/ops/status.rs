@@ -62,9 +62,9 @@ impl GoalSummary {
 #[derive(Debug)]
 pub enum StatusResult {
     /// Status of a single task.
-    Task(Task),
+    Task(Box<Task>),
     /// Status of a single goal and its tasks.
-    Goal(GoalStatus),
+    Goal(Box<GoalStatus>),
     /// Summary of every goal in the database.
     AllGoals(Vec<GoalSummary>),
 }
@@ -78,11 +78,12 @@ pub fn run(
     db: &Database,
 ) -> Result<StatusResult> {
     if let Some(tid) = task_id {
-        return get_task(&tid, db).map(StatusResult::Task);
+        return get_task(&tid, db).map(|t| StatusResult::Task(Box::new(t)));
     }
 
     if let Some(gid) = goal_id {
-        return get_goal(&gid, assignee.as_deref(), tag_filter, db).map(StatusResult::Goal);
+        return get_goal(&gid, assignee.as_deref(), tag_filter, db)
+            .map(|gs| StatusResult::Goal(Box::new(gs)));
     }
 
     Ok(StatusResult::AllGoals(get_all_goals(db)))
