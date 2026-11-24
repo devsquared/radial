@@ -19,6 +19,8 @@ pub(crate) mod cli;
 pub mod db;
 /// Parsing of human-readable stale-duration strings (e.g. `"2h"`, `"30m"`).
 pub mod duration;
+/// Typed, stable-coded operation failures (see [`error::CoreError`]).
+pub mod error;
 pub(crate) mod helpers;
 /// Identifier types for goals and tasks.
 pub mod id;
@@ -29,6 +31,7 @@ pub mod ops;
 pub(crate) mod output;
 
 pub use db::{Database, DbLock};
+pub use error::CoreError;
 pub use id::{GoalId, TaskId};
 pub use models::{
     Comment, Contract, Goal, GoalState, Metrics, Outcome, Priority, Task, TaskMetrics, TaskState,

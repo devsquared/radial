@@ -3,6 +3,7 @@ use std::collections::BTreeMap;
 use anyhow::{Result, anyhow};
 
 use crate::db::Database;
+use crate::error::CoreError;
 use crate::helpers::{detect_cycle, find_similar_id};
 use crate::id::{GoalId, TaskId};
 use crate::models::{Contract, Goal, Priority, Task, TaskState};
@@ -14,9 +15,9 @@ pub fn goal(
     tags: Option<BTreeMap<String, String>>,
     db: &mut Database,
 ) -> Result<Goal> {
-    let goal = db
-        .get_goal_mut(goal_id)
-        .ok_or_else(|| anyhow!("Goal not found: {goal_id}"))?;
+    let goal = db.get_goal_mut(goal_id).ok_or_else(|| {
+        CoreError::goal_not_found(goal_id.to_string(), format!("Goal not found: {goal_id}"))
+    })?;
 
     goal.set_description(description);
     if let Some(tags) = tags {
@@ -60,9 +61,9 @@ pub fn task(
     }
 
     // Read the task (immutable) to get its goal_id/state and validate blocked_by
-    let task = db
-        .get_task(task_id)
-        .ok_or_else(|| anyhow!("Task not found: {task_id}"))?;
+    let task = db.get_task(task_id).ok_or_else(|| {
+        CoreError::task_not_found(task_id.to_string(), format!("Task not found: {task_id}"))
+    })?;
     let goal_id = task.goal_id().clone();
     let current_state = task.state();
 
@@ -119,10 +120,8 @@ pub fn task(
 
         if let Some(cycle_path) = detect_cycle(task_id, dep_ids, &all_tasks) {
             let path_str: Vec<String> = cycle_path.iter().map(ToString::to_string).collect();
-            return Err(anyhow!(
-                "Circular dependency detected: {}",
-                path_str.join(" -> ")
-            ));
+            let message = format!("Circular dependency detected: {}", path_str.join(" -> "));
+            return Err(CoreError::cycle_detected(path_str, message).into());
         }
     }
 

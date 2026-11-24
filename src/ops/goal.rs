@@ -1,10 +1,11 @@
 use std::collections::BTreeMap;
 
-use anyhow::{Result, anyhow};
+use anyhow::Result;
 use jiff::Timestamp;
 use serde::Serialize;
 
 use crate::db::Database;
+use crate::error::CoreError;
 use crate::helpers::find_similar_id;
 use crate::id::{GoalId, TaskId};
 use crate::models::{Goal, GoalState, Metrics, TaskState};
@@ -50,9 +51,9 @@ pub fn set_tags(
     tags: BTreeMap<String, String>,
     db: &mut Database,
 ) -> Result<Goal> {
-    let goal = db
-        .get_goal_mut(goal_id)
-        .ok_or_else(|| anyhow!("Goal not found: {goal_id}"))?;
+    let goal = db.get_goal_mut(goal_id).ok_or_else(|| {
+        CoreError::goal_not_found(goal_id.to_string(), format!("Goal not found: {goal_id}"))
+    })?;
     goal.merge_tags(tags);
     let goal = goal.clone();
     db.save_goal(&goal)?;
@@ -83,15 +84,21 @@ pub fn cancel(
         let all_goals = db.list_goals();
         let goal_ids: Vec<&str> = all_goals.iter().map(|g| g.id().as_ref()).collect();
 
-        if let Some(suggestion) = find_similar_id(goal_id.as_ref(), &goal_ids) {
-            anyhow!("Goal not found: {goal_id}\nDid you mean: {suggestion}")
+        let message = if let Some(suggestion) = find_similar_id(goal_id.as_ref(), &goal_ids) {
+            format!("Goal not found: {goal_id}\nDid you mean: {suggestion}")
         } else {
-            anyhow!("Goal not found: {goal_id}")
-        }
+            format!("Goal not found: {goal_id}")
+        };
+        CoreError::goal_not_found(goal_id.to_string(), message)
     })?;
 
     if goal.state() == GoalState::Cancelled {
-        return Err(anyhow!("Goal is already cancelled"));
+        return Err(CoreError::already_in_state(
+            goal_id.to_string(),
+            GoalState::Cancelled.as_ref(),
+            "Goal is already cancelled",
+        )
+        .into());
     }
 
     // Collect IDs of non-terminal tasks to cancel
