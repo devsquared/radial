@@ -37,6 +37,7 @@ rd task create <goal_id> "Parse config" \
   --receives "config.yaml file path" \
   --produces "Config struct" \
   --verify "Unit tests pass" \
+  --verify-cmd "cargo test parse_config" \
   --blocked-by task_abc,task_def
 
 # List tasks for a goal
@@ -90,6 +91,10 @@ rd task complete <task_id> --result "Added login endpoint with JWT"
 rd task complete <task_id> --result "Done" --artifacts "src/auth.rs,src/jwt.rs"
 rd task complete <task_id> --result "Done" --tokens 1500 --elapsed 30000
 # --elapsed is optional: if omitted, it's derived from how long the task was in progress
+rd task verify <task_id>                         # Dry run the contract's verify_cmd, if it has one
+rd task complete <task_id> --result "Done" --skip-verify
+# If the contract has a verify_cmd, complete runs it and refuses on a nonzero exit or timeout
+# (the output tail is recorded as a comment); --skip-verify bypasses that once for this completion
 rd task fail <task_id>                           # Mark as failed
 rd task fail <task_id> --reason "Why it failed" # Mark failed with reason
 rd task fail <task_id> --reason "..." --compact  # Compact immediately (requires --reason)
@@ -151,6 +156,8 @@ Edit goals or tasks after creation.
 rd edit goal <goal_id> --description "Updated description"
 rd edit task <task_id> --description "New description"
 rd edit task <task_id> --receives "..." --produces "..." --verify "..."
+rd edit task <task_id> --verify-cmd "cargo test"       # set/change the executable check
+rd edit task <task_id> --clear-verify-cmd              # drop the executable check
 rd edit task <task_id> --add-blocked-by task_abc       # add a dependency
 rd edit task <task_id> --remove-blocked-by task_abc     # remove a dependency
 rd edit task <task_id> --set-blocked-by task_abc,task_def  # replace the whole list
@@ -194,6 +201,9 @@ rd clean --force             # Remove all goals regardless of status
 ### Task Rules
 
 - A contract (`--receives`, `--produces`, `--verify`) is required before a task can be started.
+  `--verify-cmd` is optional on top of that: if set, `rd task complete` runs it and refuses to
+  complete on a nonzero exit or timeout unless `--skip-verify` is passed; setting, changing, or
+  clearing it via `rd edit task` is always recorded as a comment.
 - Tasks with `--blocked-by` start in `blocked` state and move to `pending` when all blockers
   complete. If a blocker is already completed when the task is created, it is filtered out and
   does not block the new task.

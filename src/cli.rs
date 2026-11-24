@@ -227,6 +227,11 @@ pub enum TaskCommands {
         #[arg(long)]
         verify: Option<String>,
 
+        /// Shell command that checks `verify`; must exit 0. Run by `rd task
+        /// verify` and gates `rd task complete` (see --skip-verify there)
+        #[arg(long = "verify-cmd")]
+        verify_cmd: Option<String>,
+
         /// IDs of tasks this task is blocked by (comma or space separated)
         #[arg(long, value_delimiter = ',', num_args = 1..)]
         blocked_by: Option<Vec<String>>,
@@ -313,6 +318,21 @@ pub enum TaskCommands {
         /// Complete this task directly even though it has open subtasks
         #[arg(long)]
         force: bool,
+
+        /// Skip the contract's `verify_cmd` for this completion only (recorded
+        /// as a comment). Has no effect if no `verify_cmd` is set
+        #[arg(long)]
+        skip_verify: bool,
+
+        /// Output as JSON
+        #[arg(long)]
+        json: bool,
+    },
+
+    /// Run a task's `verify_cmd` as an advisory dry run, without completing it
+    Verify {
+        /// The task ID to verify
+        task_id: String,
 
         /// Output as JSON
         #[arg(long)]
@@ -539,6 +559,15 @@ pub enum EditCommands {
         /// New verify (contract)
         #[arg(long)]
         verify: Option<String>,
+
+        /// New `verify_cmd` (contract); the check `rd task verify`/`rd task
+        /// complete` runs
+        #[arg(long = "verify-cmd", conflicts_with = "clear_verify_cmd")]
+        verify_cmd: Option<String>,
+
+        /// Remove the contract's `verify_cmd`
+        #[arg(long)]
+        clear_verify_cmd: bool,
 
         /// Add dependencies to the task's existing blocked-by list (comma or space separated)
         #[arg(long, value_delimiter = ',', num_args = 1..)]

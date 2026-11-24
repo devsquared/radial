@@ -83,6 +83,19 @@ pub enum CoreError {
         message: String,
     },
 
+    /// The task's `verify_cmd` exited non-zero, or timed out, during `complete`.
+    #[error("{message}")]
+    VerifyFailed {
+        /// The task whose verify command failed.
+        task_id: String,
+        /// The command's exit code, or `None` if it was killed for timing out.
+        exit_code: Option<i32>,
+        /// Whether the command was killed for exceeding its timeout.
+        timed_out: bool,
+        /// Human-readable description of the failure, including output tails.
+        message: String,
+    },
+
     /// Another process changed the task's state between this call's read and write.
     #[error("{message}")]
     ConcurrencyConflict {
@@ -108,6 +121,7 @@ impl CoreError {
             Self::InvalidStateTransition { .. } => "invalid_state_transition",
             Self::AlreadyInState { .. } => "already_in_state",
             Self::AlreadyCompacted { .. } => "already_compacted",
+            Self::VerifyFailed { .. } => "verify_failed",
             Self::CycleDetected { .. } => "cycle_detected",
             Self::ConcurrencyConflict { .. } => "concurrency_conflict",
         }
@@ -161,6 +175,21 @@ impl CoreError {
     pub fn already_compacted(task_id: impl Into<String>, message: impl Into<String>) -> Self {
         Self::AlreadyCompacted {
             task_id: task_id.into(),
+            message: message.into(),
+        }
+    }
+
+    /// Build a [`CoreError::VerifyFailed`].
+    pub fn verify_failed(
+        task_id: impl Into<String>,
+        exit_code: Option<i32>,
+        timed_out: bool,
+        message: impl Into<String>,
+    ) -> Self {
+        Self::VerifyFailed {
+            task_id: task_id.into(),
+            exit_code,
+            timed_out,
             message: message.into(),
         }
     }

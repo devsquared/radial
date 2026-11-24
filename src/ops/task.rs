@@ -1,4 +1,5 @@
 use std::collections::{BTreeMap, HashSet, VecDeque};
+use std::fmt::Write as _;
 
 use anyhow::{Result, anyhow};
 use jiff::{SignedDuration, Timestamp};
@@ -11,6 +12,7 @@ use crate::id::{GoalId, TaskId, generate_id};
 use crate::models::{
     Comment, Contract, GoalState, Outcome, Priority, Task, TaskMetrics, TaskState,
 };
+use crate::ops::verify::VerifyResult;
 
 /// Result of completing a task, including any unblocked tasks.
 #[derive(Debug, Serialize)]
@@ -126,6 +128,7 @@ pub fn create(
     receives: Option<String>,
     produces: Option<String>,
     verify: Option<String>,
+    verify_cmd: Option<String>,
     blocked_by: Option<Vec<TaskId>>,
     tags: BTreeMap<String, String>,
     db: &mut Database,
@@ -195,15 +198,19 @@ pub fn create(
     }
 
     // Build contract if any contract fields are provided
-    let contract = if receives.is_some() || produces.is_some() || verify.is_some() {
-        Some(Contract::new(
-            receives.unwrap_or_default(),
-            produces.unwrap_or_default(),
-            verify.unwrap_or_default(),
-        ))
-    } else {
-        None
-    };
+    let contract =
+        if receives.is_some() || produces.is_some() || verify.is_some() || verify_cmd.is_some() {
+            Some(
+                Contract::new(
+                    receives.unwrap_or_default(),
+                    produces.unwrap_or_default(),
+                    verify.unwrap_or_default(),
+                )
+                .with_verify_cmd(verify_cmd),
+            )
+        } else {
+            None
+        };
 
     // Filter out already-completed blockers so a task created after its
     // blockers finish starts as pending rather than permanently blocked.
@@ -507,6 +514,90 @@ pub fn find_stale_tasks(threshold: SignedDuration, db: &Database) -> Vec<&Task> 
         .collect()
 }
 
+/// Preconditions for `complete`, checked before any `verify_cmd` runs so a
+/// task that can't be completed anyway never pays for a check.
+///
+/// Returns the contract's `verify_cmd`, if the task has one. The caller is
+/// expected to release the database lock before running it, then re-open
+/// and call `complete`, which re-checks these same conditions against
+/// whatever the state turns out to be by then.
+pub fn complete_precheck(task_id: &TaskId, force: bool, db: &Database) -> Result<Option<String>> {
+    let task = db
+        .get_task(task_id)
+        .ok_or_else(|| task_not_found_err(task_id, db))?;
+
+    if db.has_subtasks(task_id) && !force {
+        return Err(subtasks_block_err(task_id, "complete", true, db));
+    }
+
+    if task.state() != TaskState::InProgress {
+        return Err(CoreError::invalid_state_transition(
+            task.id().to_string(),
+            task.state().as_ref(),
+            TaskState::Completed.as_ref(),
+            format!(
+                "Task must be in 'in_progress' state to complete. Current state: {}",
+                task.state().as_ref()
+            ),
+        )
+        .into());
+    }
+
+    Ok(task
+        .contract()
+        .and_then(Contract::verify_cmd)
+        .map(str::to_string))
+}
+
+/// Records a failed `verify_cmd` run as a comment, including output tails,
+/// and saves it immediately — there's no later `complete` call in this path
+/// to persist it for us, since completion was just refused.
+pub fn record_verify_failure(
+    task_id: &TaskId,
+    outcome: &VerifyResult,
+    db: &mut Database,
+) -> Result<()> {
+    let mut text = if outcome.timed_out {
+        format!("verify_cmd timed out after {}ms.", outcome.duration_ms)
+    } else {
+        let code = outcome
+            .exit_code
+            .map_or_else(|| "none".to_string(), |c| c.to_string());
+        format!(
+            "verify_cmd failed (exit {code}) after {}ms.",
+            outcome.duration_ms
+        )
+    };
+    if !outcome.stdout_tail.is_empty() {
+        let _ = write!(text, "\nstdout:\n{}", outcome.stdout_tail);
+    }
+    if !outcome.stderr_tail.is_empty() {
+        let _ = write!(text, "\nstderr:\n{}", outcome.stderr_tail);
+    }
+
+    let task = db.get_task_mut(task_id).ok_or_else(|| {
+        CoreError::task_not_found(task_id.to_string(), format!("Task not found: {task_id}"))
+    })?;
+    task.add_comment(Comment::new(generate_id(), text, Timestamp::now()));
+    let task = task.clone();
+    db.save_task(&task)
+}
+
+/// Records that a `verify_cmd` was bypassed via `--skip-verify`. Not saved
+/// here — the `complete` call immediately following this one persists it
+/// as part of the task it saves, same as `record_force_override`.
+pub fn record_verify_skip(task_id: &TaskId, db: &mut Database) -> Result<()> {
+    let task = db.get_task_mut(task_id).ok_or_else(|| {
+        CoreError::task_not_found(task_id.to_string(), format!("Task not found: {task_id}"))
+    })?;
+    task.add_comment(Comment::new(
+        generate_id(),
+        "verify_cmd skipped via --skip-verify".to_string(),
+        Timestamp::now(),
+    ));
+    Ok(())
+}
+
 /// Complete an in-progress task, recording its outcome and metrics.
 ///
 /// If `elapsed` is `None`, it is derived from the time between the task's
@@ -516,6 +607,11 @@ pub fn find_stale_tasks(threshold: SignedDuration, db: &Database) -> Vec<&Task> 
 /// Compacts the task, unblocks any tasks that were waiting on it (or on its
 /// parent, if completing this task also completes the parent), and updates
 /// the goal's state if every task under it is now resolved.
+///
+/// Does not itself run `verify_cmd` — see `complete_precheck`,
+/// `record_verify_failure`/`record_verify_skip`, and `ops::verify::run_cmd`,
+/// which the CLI layer sequences around the database lock before calling
+/// this.
 #[allow(clippy::too_many_lines, clippy::too_many_arguments)]
 pub fn complete(
     task_id: &TaskId,

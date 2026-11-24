@@ -24,3 +24,5 @@ pub mod show;
 pub mod status;
 /// Create, start, complete, fail, cancel, retry, release, and comment on tasks.
 pub mod task;
+/// Run a contract's `verify_cmd` as a child process with a timeout.
+pub mod verify;

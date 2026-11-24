@@ -202,6 +202,7 @@ fn run_task(task_cmd: TaskCommands, db: &mut Database) -> Result<()> {
             receives,
             produces,
             verify,
+            verify_cmd,
             blocked_by,
             tag,
             json,
@@ -219,6 +220,7 @@ fn run_task(task_cmd: TaskCommands, db: &mut Database) -> Result<()> {
                 receives,
                 produces,
                 verify,
+                verify_cmd,
                 parse_blocked_by(blocked_by, db)?,
                 parse_tags(tag)?,
                 db,
@@ -261,19 +263,12 @@ fn run_task(task_cmd: TaskCommands, db: &mut Database) -> Result<()> {
             let task = ops::task::start(&task_id, &assignee, force, db)?;
             output::task_started(&task, &RenderOptions::new().json(json))
         }
-        TaskCommands::Complete {
-            task_id,
-            result,
-            artifacts,
-            tokens,
-            elapsed,
-            force,
-            json,
-        } => {
-            let task_id = db.resolve_any_task(&task_id).map_err(|e| anyhow!("{e}"))?;
-            let complete_result =
-                ops::task::complete(&task_id, result, artifacts, tokens, elapsed, force, db)?;
-            output::task_completed(&complete_result, &RenderOptions::new().json(json))
+        TaskCommands::Complete { .. } | TaskCommands::Verify { .. } => {
+            // Both need to release the database lock while a verify
+            // command runs, which `run()` intercepts before the lock this
+            // function is holding (`_guard`) is ever acquired. See
+            // `run_task_complete`/`run_task_verify`.
+            unreachable!("Complete and Verify are handled in run() before reaching run_task")
         }
         TaskCommands::Fail {
             task_id,
@@ -388,6 +383,118 @@ fn run_task(task_cmd: TaskCommands, db: &mut Database) -> Result<()> {
     }
 }
 
+/// `rd task verify <id>`: an advisory, read-only dry run of a task's
+/// `verify_cmd`. Releases the database lock before running it — nothing is
+/// recorded, so there's nothing to re-check afterward.
+fn run_task_verify(task_id_str: &str, json: bool) -> Result<()> {
+    let radial_dir = get_radial_path()
+        .ok_or_else(|| anyhow!("Radial not initialized. Run 'radial init' first."))?;
+
+    let (db, guard) =
+        Database::open_for_read(&radial_dir).context("Failed to open database for read")?;
+    let task_id = db
+        .resolve_any_task(task_id_str)
+        .map_err(|e| anyhow!("{e}"))?;
+    let verify_cmd = db
+        .get_task(&task_id)
+        .and_then(Task::contract)
+        .and_then(Contract::verify_cmd)
+        .map(str::to_string);
+    drop(guard);
+    drop(db);
+
+    let Some(cmd) = verify_cmd else {
+        return Err(anyhow!(
+            "Task {task_id} has no verify_cmd set. Set one with \
+             'rd edit task {task_id} --verify-cmd <command>'."
+        ));
+    };
+
+    let result = ops::verify::run_cmd(&cmd, ops::verify::DEFAULT_TIMEOUT)?;
+    output::task_verified(&task_id, &result, &RenderOptions::new().json(json))
+}
+
+/// `rd task complete`: runs the contract's `verify_cmd` (unless it has none,
+/// or `--skip-verify` was passed) and refuses to complete on a nonzero exit
+/// or timeout.
+///
+/// Sequences the database lock around the external process per
+/// `ROADMAP.md`'s executable-verification item: load state, release the
+/// lock, run the check, re-acquire the lock, then let `ops::task::complete`
+/// re-validate the task's state before recording anything.
+// `guard`'s final assignment is only ever "read" by its Drop running at
+// scope end, which these lints don't count as a use — the reassignment
+// itself is the point: it keeps the reacquired lock held until then.
+#[allow(clippy::too_many_arguments, unused_assignments)]
+fn run_task_complete(
+    task_id_str: &str,
+    result: String,
+    artifacts: Option<Vec<String>>,
+    tokens: Option<i64>,
+    elapsed: Option<i64>,
+    force: bool,
+    skip_verify: bool,
+    json: bool,
+) -> Result<()> {
+    let radial_dir = get_radial_path()
+        .ok_or_else(|| anyhow!("Radial not initialized. Run 'radial init' first."))?;
+
+    let (mut db, mut guard) =
+        Database::open_for_write(&radial_dir).context("Failed to open database for write")?;
+    let task_id = db
+        .resolve_any_task(task_id_str)
+        .map_err(|e| anyhow!("{e}"))?;
+    let verify_cmd = ops::task::complete_precheck(&task_id, force, &db)?;
+    let had_verify_cmd = verify_cmd.is_some();
+
+    if skip_verify {
+        if had_verify_cmd {
+            ops::task::record_verify_skip(&task_id, &mut db)?;
+        }
+    } else if let Some(cmd) = verify_cmd {
+        drop(guard);
+        drop(db);
+
+        let outcome = ops::verify::run_cmd(&cmd, ops::verify::DEFAULT_TIMEOUT)?;
+
+        let (reopened_db, reopened_guard) =
+            Database::open_for_write(&radial_dir).context("Failed to open database for write")?;
+        db = reopened_db;
+        guard = reopened_guard;
+
+        if !outcome.passed {
+            ops::task::record_verify_failure(&task_id, &outcome, &mut db)?;
+            let code_desc = if outcome.timed_out {
+                "timed out".to_string()
+            } else {
+                outcome
+                    .exit_code
+                    .map_or_else(|| "no exit code".to_string(), |c| format!("exit {c}"))
+            };
+            return Err(CoreError::verify_failed(
+                task_id.to_string(),
+                outcome.exit_code,
+                outcome.timed_out,
+                format!(
+                    "Verify command failed for task {task_id} ({code_desc}).\n{}\n\
+                     Fix the issue and retry 'rd task complete {task_id}', \
+                     or pass --skip-verify to bypass once.",
+                    if outcome.stderr_tail.is_empty() {
+                        &outcome.stdout_tail
+                    } else {
+                        &outcome.stderr_tail
+                    }
+                ),
+            )
+            .into());
+        }
+    }
+
+    let complete_result =
+        ops::task::complete(&task_id, result, artifacts, tokens, elapsed, force, &mut db)?;
+    output::task_completed(&complete_result, &RenderOptions::new().json(json))
+}
+
 /// Parses CLI arguments and dispatches to the appropriate command.
 ///
 /// Entry point for the `rd` binary; not part of the library's public API.
@@ -420,6 +527,26 @@ fn run(cli: Cli) -> Result<()> {
             };
             output::list(&results, &RenderOptions::new().json(json).full(full))
         }
+        Commands::Task(TaskCommands::Complete {
+            task_id,
+            result,
+            artifacts,
+            tokens,
+            elapsed,
+            force,
+            skip_verify,
+            json,
+        }) => run_task_complete(
+            &task_id,
+            result,
+            artifacts,
+            tokens,
+            elapsed,
+            force,
+            skip_verify,
+            json,
+        ),
+        Commands::Task(TaskCommands::Verify { task_id, json }) => run_task_verify(&task_id, json),
         Commands::Task(task_cmd) => {
             let (mut db, _guard) = ensure_initialized_for_write()?;
             run_task(task_cmd, &mut db)
@@ -445,6 +572,8 @@ fn run(cli: Cli) -> Result<()> {
                     receives,
                     produces,
                     verify,
+                    verify_cmd,
+                    clear_verify_cmd,
                     add_blocked_by,
                     remove_blocked_by,
                     set_blocked_by,
@@ -466,6 +595,8 @@ fn run(cli: Cli) -> Result<()> {
                         receives,
                         produces,
                         verify,
+                        verify_cmd,
+                        clear_verify_cmd,
                         parse_blocked_by(add_blocked_by, &db)?,
                         parse_blocked_by(remove_blocked_by, &db)?,
                         parse_blocked_by(set_blocked_by.or(blocked_by), &db)?,

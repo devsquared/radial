@@ -1,12 +1,13 @@
 use std::collections::BTreeMap;
 
 use anyhow::{Result, anyhow};
+use jiff::Timestamp;
 
 use crate::db::Database;
 use crate::error::CoreError;
 use crate::helpers::{detect_cycle, find_similar_id};
-use crate::id::{GoalId, TaskId};
-use crate::models::{Contract, Goal, Priority, Task, TaskState};
+use crate::id::{GoalId, TaskId, generate_id};
+use crate::models::{Comment, Contract, Goal, Priority, Task, TaskState};
 
 /// Update a goal's description and/or upsert tags onto it.
 pub fn goal(
@@ -40,6 +41,10 @@ pub fn goal(
 /// new list (`Blocked` if any blocker isn't `Completed`, `Pending`
 /// otherwise) using the same logic `ops::task::create` applies to a
 /// freshly created task.
+///
+/// `verify_cmd` replaces the contract's check wholesale (`clear_verify_cmd`
+/// drops it instead); either way, a comment records the change so a check
+/// being edited or dropped is never silent.
 #[allow(clippy::too_many_arguments, clippy::too_many_lines)]
 pub fn task(
     task_id: &TaskId,
@@ -48,6 +53,8 @@ pub fn task(
     receives: Option<String>,
     produces: Option<String>,
     verify: Option<String>,
+    verify_cmd: Option<String>,
+    clear_verify_cmd: bool,
     add_blocked_by: Option<Vec<TaskId>>,
     remove_blocked_by: Option<Vec<TaskId>>,
     set_blocked_by: Option<Vec<TaskId>>,
@@ -157,7 +164,12 @@ pub fn task(
     }
 
     // Update contract fields, merging with existing values
-    if receives.is_some() || produces.is_some() || verify.is_some() {
+    if receives.is_some()
+        || produces.is_some()
+        || verify.is_some()
+        || verify_cmd.is_some()
+        || clear_verify_cmd
+    {
         let existing = task.contract();
         let new_receives = receives
             .unwrap_or_else(|| existing.map_or(String::new(), |c| c.receives().to_string()));
@@ -165,7 +177,26 @@ pub fn task(
             .unwrap_or_else(|| existing.map_or(String::new(), |c| c.produces().to_string()));
         let new_verify =
             verify.unwrap_or_else(|| existing.map_or(String::new(), |c| c.verify().to_string()));
-        task.set_contract(Contract::new(new_receives, new_produces, new_verify));
+        let old_verify_cmd = existing.and_then(Contract::verify_cmd).map(str::to_string);
+        let new_verify_cmd = if clear_verify_cmd {
+            None
+        } else {
+            verify_cmd.or_else(|| old_verify_cmd.clone())
+        };
+
+        if new_verify_cmd != old_verify_cmd {
+            let text = match (&old_verify_cmd, &new_verify_cmd) {
+                (None, Some(cmd)) => format!("verify_cmd set to `{cmd}`"),
+                (Some(_), None) => "verify_cmd cleared".to_string(),
+                (Some(old), Some(new)) => format!("verify_cmd changed from `{old}` to `{new}`"),
+                (None, None) => unreachable!("guarded by the != check above"),
+            };
+            task.add_comment(Comment::new(generate_id(), text, Timestamp::now()));
+        }
+
+        task.set_contract(
+            Contract::new(new_receives, new_produces, new_verify).with_verify_cmd(new_verify_cmd),
+        );
     }
 
     if let Some(deps) = new_blocked_by {

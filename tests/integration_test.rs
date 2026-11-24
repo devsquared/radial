@@ -4232,3 +4232,281 @@ fn test_list_filter_by_tag() {
     assert!(output.contains("Task A"));
     assert!(!output.contains("Task B"));
 }
+
+fn create_started_task_with_verify_cmd(env: &TestEnv, label: &str, verify_cmd: &str) -> String {
+    let output = env
+        .run(&["goal", "create", &format!("{label} goal")])
+        .expect("Create goal failed");
+    let goal_id = extract_created_id(&output, "Created goal:");
+
+    let output = env
+        .run(&[
+            "task",
+            "create",
+            &goal_id,
+            label,
+            "--verify-cmd",
+            verify_cmd,
+        ])
+        .expect("Create task failed");
+    let task_id = extract_created_id(&output, "Created task:");
+
+    env.run(&["task", "start", &task_id, "--assignee", "tester"])
+        .expect("Start task failed");
+
+    task_id
+}
+
+#[test]
+fn test_task_verify_runs_verify_cmd_and_reports_pass() {
+    let env = TestEnv::new();
+    env.run(&["init"]).expect("Init failed");
+    let task_id = create_started_task_with_verify_cmd(&env, "Verify pass task", "exit 0");
+
+    let output = env
+        .run(&["task", "verify", &task_id, "--json"])
+        .expect("Verify failed");
+    let parsed: Value = serde_json::from_str(&output).expect("Should be valid JSON");
+    assert_eq!(parsed["passed"], true);
+    assert_eq!(parsed["exit_code"], 0);
+
+    // Advisory only: the task is untouched, still in_progress.
+    let output = env
+        .run(&["status", "--task", &task_id, "--json"])
+        .expect("Status failed");
+    let parsed: Value = serde_json::from_str(&output).expect("Should be valid JSON");
+    assert_eq!(parsed["state"], "in_progress");
+}
+
+#[test]
+fn test_task_verify_reports_failure_without_touching_state() {
+    let env = TestEnv::new();
+    env.run(&["init"]).expect("Init failed");
+    let task_id = create_started_task_with_verify_cmd(&env, "Verify fail task", "exit 3");
+
+    let output = env
+        .run(&["task", "verify", &task_id, "--json"])
+        .expect("Verify failed");
+    let parsed: Value = serde_json::from_str(&output).expect("Should be valid JSON");
+    assert_eq!(parsed["passed"], false);
+    assert_eq!(parsed["exit_code"], 3);
+}
+
+#[test]
+fn test_task_verify_without_verify_cmd_errors() {
+    let env = TestEnv::new();
+    env.run(&["init"]).expect("Init failed");
+
+    let output = env
+        .run(&["goal", "create", "No verify cmd goal"])
+        .expect("Create goal failed");
+    let goal_id = extract_created_id(&output, "Created goal:");
+    let output = env
+        .run(&["task", "create", &goal_id, "No verify cmd task"])
+        .expect("Create task failed");
+    let task_id = extract_created_id(&output, "Created task:");
+
+    let result = env.run(&["task", "verify", &task_id]);
+    assert!(result.is_err());
+    assert!(result.unwrap_err().contains("no verify_cmd set"));
+}
+
+#[test]
+fn test_task_complete_refuses_on_failing_verify_cmd() {
+    let env = TestEnv::new();
+    env.run(&["init"]).expect("Init failed");
+    let task_id = create_started_task_with_verify_cmd(&env, "Gated complete task", "exit 1");
+
+    let result = env.run(&["task", "complete", &task_id, "--result", "Done"]);
+    assert!(result.is_err(), "complete should refuse a failing verify");
+    let err = result.unwrap_err();
+    assert!(err.contains("Verify command failed"));
+    assert!(err.contains("--skip-verify"));
+
+    // Task stays in_progress, and the failure is visible as a comment.
+    let output = env
+        .run(&["status", "--task", &task_id, "--json"])
+        .expect("Status failed");
+    let parsed: Value = serde_json::from_str(&output).expect("Should be valid JSON");
+    assert_eq!(parsed["state"], "in_progress");
+
+    let output = env
+        .run(&["task", "comments", &task_id])
+        .expect("Comments failed");
+    assert!(output.contains("verify_cmd failed"));
+}
+
+#[test]
+fn test_task_complete_succeeds_on_passing_verify_cmd() {
+    let env = TestEnv::new();
+    env.run(&["init"]).expect("Init failed");
+    let task_id = create_started_task_with_verify_cmd(&env, "Passing complete task", "exit 0");
+
+    let output = env
+        .run(&["task", "complete", &task_id, "--result", "Done", "--json"])
+        .expect("Complete should succeed when verify_cmd passes");
+    let parsed: Value = serde_json::from_str(&output).expect("Should be valid JSON");
+    assert_eq!(parsed["task"]["state"], "completed");
+}
+
+#[test]
+fn test_task_complete_skip_verify_bypasses_failing_verify_cmd() {
+    let env = TestEnv::new();
+    env.run(&["init"]).expect("Init failed");
+    let task_id = create_started_task_with_verify_cmd(&env, "Skip verify task", "exit 1");
+
+    let output = env
+        .run(&[
+            "task",
+            "complete",
+            &task_id,
+            "--result",
+            "Done",
+            "--skip-verify",
+            "--json",
+        ])
+        .expect("Complete with --skip-verify should succeed despite failing verify_cmd");
+    let parsed: Value = serde_json::from_str(&output).expect("Should be valid JSON");
+    assert_eq!(parsed["task"]["state"], "completed");
+
+    let output = env
+        .run(&["task", "comments", &task_id])
+        .expect("Comments failed");
+    assert!(output.contains("verify_cmd skipped via --skip-verify"));
+}
+
+#[test]
+fn test_task_complete_skip_verify_is_a_noop_without_a_verify_cmd() {
+    let env = TestEnv::new();
+    env.run(&["init"]).expect("Init failed");
+
+    let output = env
+        .run(&["goal", "create", "Skip verify noop goal"])
+        .expect("Create goal failed");
+    let goal_id = extract_created_id(&output, "Created goal:");
+    let output = env
+        .run(&[
+            "task",
+            "create",
+            &goal_id,
+            "Skip verify noop task",
+            "--receives",
+            "Input",
+            "--produces",
+            "Output",
+            "--verify",
+            "Check",
+        ])
+        .expect("Create task failed");
+    let task_id = extract_created_id(&output, "Created task:");
+    env.run(&["task", "start", &task_id, "--assignee", "tester"])
+        .expect("Start task failed");
+
+    let output = env
+        .run(&[
+            "task",
+            "complete",
+            &task_id,
+            "--result",
+            "Done",
+            "--skip-verify",
+            "--json",
+        ])
+        .expect("Complete with --skip-verify and no verify_cmd should succeed");
+    let parsed: Value = serde_json::from_str(&output).expect("Should be valid JSON");
+    assert_eq!(parsed["task"]["state"], "completed");
+
+    let output = env
+        .run(&["task", "comments", &task_id])
+        .expect("Comments failed");
+    assert!(!output.contains("verify_cmd skipped"));
+}
+
+/// This is the structural part of "verify as a structured operation": the
+/// `.radial` database lock must be released while `verify_cmd` runs, not
+/// held across it. Proves that by running a slow `verify_cmd` under
+/// `task complete` and checking that a concurrent command (which needs its
+/// own lock) finishes quickly instead of queueing behind it.
+#[test]
+fn test_task_complete_releases_db_lock_while_verify_cmd_runs() {
+    use std::thread;
+    use std::time::{Duration, Instant};
+
+    let env = TestEnv::new();
+    env.run(&["init"]).expect("Init failed");
+    let task_id = create_started_task_with_verify_cmd(&env, "Lock release task", "sleep 2");
+
+    let binary_path = env.binary_path.clone();
+    let work_dir = env.work_dir.clone();
+    let task_id_for_thread = task_id.clone();
+    let complete_handle = thread::spawn(move || {
+        Command::new(&binary_path)
+            .args(["task", "complete", &task_id_for_thread, "--result", "Done"])
+            .current_dir(&work_dir)
+            .output()
+            .expect("Failed to run task complete")
+    });
+
+    // Give `complete` time to acquire the lock, read state, and release it
+    // before its verify_cmd's sleep is done.
+    thread::sleep(Duration::from_millis(400));
+
+    let start = Instant::now();
+    let output = env
+        .run(&["goal", "create", "Concurrent during verify_cmd"])
+        .expect("A concurrent write should succeed while verify_cmd is running");
+    let elapsed = start.elapsed();
+    assert!(output.contains("Created goal:"));
+    assert!(
+        elapsed < Duration::from_millis(1200),
+        "Concurrent command took {elapsed:?} — the database lock appears to \
+         have been held across verify_cmd's run instead of released"
+    );
+
+    let complete_output = complete_handle.join().expect("complete thread panicked");
+    assert!(
+        complete_output.status.success(),
+        "task complete should succeed once its verify_cmd (sleep 2) passes: {}",
+        String::from_utf8_lossy(&complete_output.stderr)
+    );
+
+    let output = env
+        .run(&["status", "--task", &task_id, "--json"])
+        .expect("Status failed");
+    let parsed: Value = serde_json::from_str(&output).expect("Should be valid JSON");
+    assert_eq!(parsed["state"], "completed");
+}
+
+#[test]
+fn test_edit_task_verify_cmd_set_change_and_clear_record_comments() {
+    let env = TestEnv::new();
+    env.run(&["init"]).expect("Init failed");
+
+    let output = env
+        .run(&["goal", "create", "Edit verify_cmd goal"])
+        .expect("Create goal failed");
+    let goal_id = extract_created_id(&output, "Created goal:");
+    let output = env
+        .run(&["task", "create", &goal_id, "Edit verify_cmd task"])
+        .expect("Create task failed");
+    let task_id = extract_created_id(&output, "Created task:");
+
+    env.run(&["edit", "task", &task_id, "--verify-cmd", "exit 0"])
+        .expect("Setting verify_cmd failed");
+    env.run(&["edit", "task", &task_id, "--verify-cmd", "exit 1"])
+        .expect("Changing verify_cmd failed");
+    env.run(&["edit", "task", &task_id, "--clear-verify-cmd"])
+        .expect("Clearing verify_cmd failed");
+
+    let output = env
+        .run(&["task", "comments", &task_id])
+        .expect("Comments failed");
+    assert!(output.contains("verify_cmd set to `exit 0`"));
+    assert!(output.contains("verify_cmd changed from `exit 0` to `exit 1`"));
+    assert!(output.contains("verify_cmd cleared"));
+
+    // Cleared, so `rd task verify` has nothing to run.
+    let result = env.run(&["task", "verify", &task_id]);
+    assert!(result.is_err());
+    assert!(result.unwrap_err().contains("no verify_cmd set"));
+}
