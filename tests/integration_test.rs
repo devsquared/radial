@@ -4422,6 +4422,61 @@ fn test_task_complete_skip_verify_is_a_noop_without_a_verify_cmd() {
     assert!(!output.contains("verify_cmd skipped"));
 }
 
+/// This is the structural part of "verify as a structured operation": the
+/// `.radial` database lock must be released while `verify_cmd` runs, not
+/// held across it. Proves that by running a slow `verify_cmd` under
+/// `task complete` and checking that a concurrent command (which needs its
+/// own lock) finishes quickly instead of queueing behind it.
+#[test]
+fn test_task_complete_releases_db_lock_while_verify_cmd_runs() {
+    use std::thread;
+    use std::time::{Duration, Instant};
+
+    let env = TestEnv::new();
+    env.run(&["init"]).expect("Init failed");
+    let task_id = create_started_task_with_verify_cmd(&env, "Lock release task", "sleep 2");
+
+    let binary_path = env.binary_path.clone();
+    let work_dir = env.work_dir.clone();
+    let task_id_for_thread = task_id.clone();
+    let complete_handle = thread::spawn(move || {
+        Command::new(&binary_path)
+            .args(["task", "complete", &task_id_for_thread, "--result", "Done"])
+            .current_dir(&work_dir)
+            .output()
+            .expect("Failed to run task complete")
+    });
+
+    // Give `complete` time to acquire the lock, read state, and release it
+    // before its verify_cmd's sleep is done.
+    thread::sleep(Duration::from_millis(400));
+
+    let start = Instant::now();
+    let output = env
+        .run(&["goal", "create", "Concurrent during verify_cmd"])
+        .expect("A concurrent write should succeed while verify_cmd is running");
+    let elapsed = start.elapsed();
+    assert!(output.contains("Created goal:"));
+    assert!(
+        elapsed < Duration::from_millis(1200),
+        "Concurrent command took {elapsed:?} — the database lock appears to \
+         have been held across verify_cmd's run instead of released"
+    );
+
+    let complete_output = complete_handle.join().expect("complete thread panicked");
+    assert!(
+        complete_output.status.success(),
+        "task complete should succeed once its verify_cmd (sleep 2) passes: {}",
+        String::from_utf8_lossy(&complete_output.stderr)
+    );
+
+    let output = env
+        .run(&["status", "--task", &task_id, "--json"])
+        .expect("Status failed");
+    let parsed: Value = serde_json::from_str(&output).expect("Should be valid JSON");
+    assert_eq!(parsed["state"], "completed");
+}
+
 #[test]
 fn test_edit_task_verify_cmd_set_change_and_clear_record_comments() {
     let env = TestEnv::new();
