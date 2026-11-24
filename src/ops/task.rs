@@ -5,6 +5,7 @@ use jiff::{SignedDuration, Timestamp};
 use serde::Serialize;
 
 use crate::db::Database;
+use crate::error::CoreError;
 use crate::helpers::find_similar_id;
 use crate::id::{GoalId, TaskId, generate_id};
 use crate::models::{
@@ -42,11 +43,12 @@ fn task_not_found_err(task_id: &TaskId, db: &Database) -> anyhow::Error {
         })
         .collect();
 
-    if let Some(suggestion) = find_similar_id(task_id.as_ref(), &all_task_ids) {
-        anyhow!("Task not found: {task_id}\nDid you mean: {suggestion}")
+    let message = if let Some(suggestion) = find_similar_id(task_id.as_ref(), &all_task_ids) {
+        format!("Task not found: {task_id}\nDid you mean: {suggestion}")
     } else {
-        anyhow!("Task not found: {task_id}")
-    }
+        format!("Task not found: {task_id}")
+    };
+    CoreError::task_not_found(task_id.to_string(), message).into()
 }
 
 /// Builds the "has subtasks" error for an op that refuses to act on a
@@ -101,9 +103,9 @@ fn force_override_comment_text(task_id: &TaskId, verb: &str, db: &Database) -> S
 /// parent's state from its subtasks and can silently overwrite this one.
 fn record_force_override(task_id: &TaskId, verb: &str, db: &mut Database) -> Result<()> {
     let text = force_override_comment_text(task_id, verb, db);
-    let task = db
-        .get_task_mut(task_id)
-        .ok_or_else(|| anyhow!("Task not found: {task_id}"))?;
+    let task = db.get_task_mut(task_id).ok_or_else(|| {
+        CoreError::task_not_found(task_id.to_string(), format!("Task not found: {task_id}"))
+    })?;
     task.add_comment(Comment::new(generate_id(), text, Timestamp::now()));
     Ok(())
 }
@@ -134,13 +136,12 @@ pub fn create(
         let all_goals = db.list_goals();
         let goal_ids: Vec<&str> = all_goals.iter().map(|g| g.id().as_ref()).collect();
 
-        return if let Some(suggestion) = find_similar_id(goal_id.as_ref(), &goal_ids) {
-            Err(anyhow!(
-                "Goal not found: {goal_id}\nDid you mean: {suggestion}"
-            ))
+        let message = if let Some(suggestion) = find_similar_id(goal_id.as_ref(), &goal_ids) {
+            format!("Goal not found: {goal_id}\nDid you mean: {suggestion}")
         } else {
-            Err(anyhow!("Goal not found: {goal_id}"))
+            format!("Goal not found: {goal_id}")
         };
+        return Err(CoreError::goal_not_found(goal_id.to_string(), message).into());
     }
 
     let goal = goal.unwrap();
@@ -148,9 +149,9 @@ pub fn create(
 
     // Validate parent task if provided
     if let Some(ref pid) = parent_id {
-        let parent = db
-            .get_task(pid)
-            .ok_or_else(|| anyhow!("Parent task not found: {pid}"))?;
+        let parent = db.get_task(pid).ok_or_else(|| {
+            CoreError::task_not_found(pid.to_string(), format!("Parent task not found: {pid}"))
+        })?;
 
         if parent.goal_id() != &goal_id_owned {
             return Err(anyhow!("Parent task {pid} belongs to a different goal"));
@@ -263,8 +264,9 @@ pub fn list(
     tag_filter: &BTreeMap<String, String>,
     db: &Database,
 ) -> Result<Vec<Task>> {
-    db.get_goal(goal_id)
-        .ok_or_else(|| anyhow!("Goal not found: {goal_id}"))?;
+    db.get_goal(goal_id).ok_or_else(|| {
+        CoreError::goal_not_found(goal_id.to_string(), format!("Goal not found: {goal_id}"))
+    })?;
 
     let mut tasks: Vec<Task> = db
         .list_tasks(goal_id)
@@ -364,10 +366,16 @@ pub fn start(task_id: &TaskId, assignee: &str, force: bool, db: &mut Database) -
     }
 
     if task.state() != TaskState::Pending && task.state() != TaskState::Blocked {
-        return Err(anyhow!(
-            "Task must be in 'pending' state to start. Current state: {}",
-            task.state().as_ref()
-        ));
+        return Err(CoreError::invalid_state_transition(
+            task.id().to_string(),
+            task.state().as_ref(),
+            TaskState::InProgress.as_ref(),
+            format!(
+                "Task must be in 'pending' state to start. Current state: {}",
+                task.state().as_ref()
+            ),
+        )
+        .into());
     }
 
     let goal_id = task.goal_id().to_owned();
@@ -379,9 +387,12 @@ pub fn start(task_id: &TaskId, assignee: &str, force: bool, db: &mut Database) -
         TaskState::InProgress,
     );
     if !started {
-        return Err(anyhow!(
-            "Failed to start task: another process may have already started it"
-        ));
+        return Err(CoreError::concurrency_conflict(
+            task_id.to_string(),
+            "start",
+            "Failed to start task: another process may have already started it",
+        )
+        .into());
     }
     task.set_assignee(Some(assignee.to_owned()));
     let task = task.clone();
@@ -529,10 +540,16 @@ pub fn complete(
     let force_override = force && db.has_subtasks(task_id);
 
     if task.state() != TaskState::InProgress {
-        return Err(anyhow!(
-            "Task must be in 'in_progress' state to complete. Current state: {}",
-            task.state().as_ref()
-        ));
+        return Err(CoreError::invalid_state_transition(
+            task.id().to_string(),
+            task.state().as_ref(),
+            TaskState::Completed.as_ref(),
+            format!(
+                "Task must be in 'in_progress' state to complete. Current state: {}",
+                task.state().as_ref()
+            ),
+        )
+        .into());
     }
 
     let outcome = build_outcome_and_metrics(task, result_summary, artifacts, tokens, elapsed);
@@ -569,10 +586,16 @@ pub fn accept(
     let force_override = force && db.has_subtasks(task_id);
 
     if task.state() != TaskState::Verifying {
-        return Err(anyhow!(
-            "Task must be in 'verifying' state to accept. Current state: {}",
-            task.state().as_ref()
-        ));
+        return Err(CoreError::invalid_state_transition(
+            task.id().to_string(),
+            task.state().as_ref(),
+            TaskState::Completed.as_ref(),
+            format!(
+                "Task must be in 'verifying' state to accept. Current state: {}",
+                task.state().as_ref()
+            ),
+        )
+        .into());
     }
 
     let outcome = build_outcome_and_metrics(task, result_summary, artifacts, tokens, elapsed);
@@ -617,9 +640,12 @@ fn finish_completion(
 ) -> Result<CompleteResult> {
     let task = db.get_task_mut(task_id).unwrap();
     if !task.complete(outcome, metrics) {
-        return Err(anyhow!(
-            "Failed to complete task: another process may have changed its state"
-        ));
+        return Err(CoreError::concurrency_conflict(
+            task_id.to_string(),
+            "complete",
+            "Failed to complete task: another process may have changed its state",
+        )
+        .into());
     }
     let completed_task = task.clone();
     db.save_task(&completed_task)?;
@@ -693,9 +719,9 @@ fn finish_completion(
     let any_completed = all_tasks.iter().any(|t| t.state() == TaskState::Completed);
     let any_failed = all_tasks.iter().any(|t| t.state() == TaskState::Failed);
 
-    let goal = db
-        .get_goal_mut(&goal_id)
-        .ok_or_else(|| anyhow!("Goal not found: {goal_id}"))?;
+    let goal = db.get_goal_mut(&goal_id).ok_or_else(|| {
+        CoreError::goal_not_found(goal_id.to_string(), format!("Goal not found: {goal_id}"))
+    })?;
 
     if all_resolved {
         if any_completed {
@@ -742,10 +768,16 @@ pub fn fail(
     let force_override = force && db.has_subtasks(task_id);
 
     if task.state() != TaskState::InProgress && task.state() != TaskState::Verifying {
-        return Err(anyhow!(
-            "Task must be in 'in_progress' or 'verifying' state to fail. Current state: {}",
-            task.state().as_ref()
-        ));
+        return Err(CoreError::invalid_state_transition(
+            task.id().to_string(),
+            task.state().as_ref(),
+            TaskState::Failed.as_ref(),
+            format!(
+                "Task must be in 'in_progress' or 'verifying' state to fail. Current state: {}",
+                task.state().as_ref()
+            ),
+        )
+        .into());
     }
 
     let task = db.get_task_mut(task_id).unwrap();
@@ -753,9 +785,12 @@ pub fn fail(
         &[TaskState::InProgress, TaskState::Verifying],
         TaskState::Failed,
     ) {
-        return Err(anyhow!(
-            "Failed to mark task as failed: state may have changed"
-        ));
+        return Err(CoreError::concurrency_conflict(
+            task_id.to_string(),
+            "fail",
+            "Failed to mark task as failed: state may have changed",
+        )
+        .into());
     }
 
     if let Some(ref r) = reason {
@@ -807,15 +842,26 @@ pub fn retry(task_id: &TaskId, force: bool, db: &mut Database) -> Result<Task> {
     let force_override = force && db.has_subtasks(task_id);
 
     if task.state() != TaskState::Failed {
-        return Err(anyhow!(
-            "Task must be in 'failed' state to retry. Current state: {}",
-            task.state().as_ref()
-        ));
+        return Err(CoreError::invalid_state_transition(
+            task.id().to_string(),
+            task.state().as_ref(),
+            TaskState::Pending.as_ref(),
+            format!(
+                "Task must be in 'failed' state to retry. Current state: {}",
+                task.state().as_ref()
+            ),
+        )
+        .into());
     }
 
     let task = db.get_task_mut(task_id).unwrap();
     if !task.retry() {
-        return Err(anyhow!("Failed to retry task: state may have changed"));
+        return Err(CoreError::concurrency_conflict(
+            task_id.to_string(),
+            "retry",
+            "Failed to retry task: state may have changed",
+        )
+        .into());
     }
     if force_override {
         record_force_override(task_id, "retry", db)?;
@@ -850,15 +896,26 @@ pub fn submit(task_id: &TaskId, force: bool, db: &mut Database) -> Result<Task> 
     let force_override = force && db.has_subtasks(task_id);
 
     if task.state() != TaskState::InProgress {
-        return Err(anyhow!(
-            "Task must be in 'in_progress' state to submit. Current state: {}",
-            task.state().as_ref()
-        ));
+        return Err(CoreError::invalid_state_transition(
+            task.id().to_string(),
+            task.state().as_ref(),
+            TaskState::Verifying.as_ref(),
+            format!(
+                "Task must be in 'in_progress' state to submit. Current state: {}",
+                task.state().as_ref()
+            ),
+        )
+        .into());
     }
 
     let task = db.get_task_mut(task_id).unwrap();
     if !task.transition_from_any(&[TaskState::InProgress], TaskState::Verifying) {
-        return Err(anyhow!("Failed to submit task: state may have changed"));
+        return Err(CoreError::concurrency_conflict(
+            task_id.to_string(),
+            "submit",
+            "Failed to submit task: state may have changed",
+        )
+        .into());
     }
     if force_override {
         record_force_override(task_id, "submit", db)?;
@@ -893,15 +950,26 @@ pub fn reject(task_id: &TaskId, reason: String, force: bool, db: &mut Database) 
     let force_override = force && db.has_subtasks(task_id);
 
     if task.state() != TaskState::Verifying {
-        return Err(anyhow!(
-            "Task must be in 'verifying' state to reject. Current state: {}",
-            task.state().as_ref()
-        ));
+        return Err(CoreError::invalid_state_transition(
+            task.id().to_string(),
+            task.state().as_ref(),
+            TaskState::InProgress.as_ref(),
+            format!(
+                "Task must be in 'verifying' state to reject. Current state: {}",
+                task.state().as_ref()
+            ),
+        )
+        .into());
     }
 
     let task = db.get_task_mut(task_id).unwrap();
     if !task.reject(&reason) {
-        return Err(anyhow!("Failed to reject task: state may have changed"));
+        return Err(CoreError::concurrency_conflict(
+            task_id.to_string(),
+            "reject",
+            "Failed to reject task: state may have changed",
+        )
+        .into());
     }
     if force_override {
         record_force_override(task_id, "reject", db)?;
@@ -930,10 +998,15 @@ pub fn release(task_id: &TaskId, force: bool, db: &mut Database) -> Result<Task>
 
     let task = db.get_task_mut(task_id).unwrap();
     if !task.release() {
-        return Err(anyhow!(
-            "Task has no assignee to release. Current state: {}",
-            task.state().as_ref()
-        ));
+        return Err(CoreError::already_in_state(
+            task_id.to_string(),
+            task.state().as_ref(),
+            format!(
+                "Task has no assignee to release. Current state: {}",
+                task.state().as_ref()
+            ),
+        )
+        .into());
     }
     if force_override {
         record_force_override(task_id, "release", db)?;
@@ -1044,13 +1117,21 @@ pub fn cancel(
 
     let task = db.get_task(task_id).unwrap();
     if task.state() == TaskState::Completed {
-        return Err(anyhow!(
-            "Cannot cancel a completed task. Completed work is history."
-        ));
+        return Err(CoreError::already_in_state(
+            task_id.to_string(),
+            TaskState::Completed.as_ref(),
+            "Cannot cancel a completed task. Completed work is history.",
+        )
+        .into());
     }
 
     if task.state() == TaskState::Cancelled {
-        return Err(anyhow!("Task is already cancelled."));
+        return Err(CoreError::already_in_state(
+            task_id.to_string(),
+            TaskState::Cancelled.as_ref(),
+            "Task is already cancelled.",
+        )
+        .into());
     }
 
     let goal_id = task.goal_id().clone();
@@ -1059,7 +1140,12 @@ pub fn cancel(
     // Cancel the task
     let task = db.get_task_mut(task_id).unwrap();
     if !task.cancel() {
-        return Err(anyhow!("Failed to cancel task: state may have changed"));
+        return Err(CoreError::concurrency_conflict(
+            task_id.to_string(),
+            "cancel",
+            "Failed to cancel task: state may have changed",
+        )
+        .into());
     }
 
     // Add cancel comment with author and reason
@@ -1151,10 +1237,16 @@ pub fn delete(task_id: &TaskId, db: &mut Database) -> Result<Task> {
     }
 
     if task.state() != TaskState::Pending {
-        return Err(anyhow!(
-            "Task must be in 'pending' state to delete. Current state: {}",
-            task.state().as_ref()
-        ));
+        return Err(CoreError::invalid_state_transition(
+            task_id.to_string(),
+            task.state().as_ref(),
+            "deleted",
+            format!(
+                "Task must be in 'pending' state to delete. Current state: {}",
+                task.state().as_ref()
+            ),
+        )
+        .into());
     }
 
     let task = task.clone();

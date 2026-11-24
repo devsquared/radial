@@ -1,9 +1,10 @@
 use std::collections::BTreeMap;
 
-use anyhow::{Result, anyhow};
+use anyhow::Result;
 use serde::Serialize;
 
 use crate::db::Database;
+use crate::error::CoreError;
 use crate::id::GoalId;
 use crate::id::TaskId;
 use crate::models::{Goal, Metrics, Task};
@@ -88,9 +89,9 @@ pub fn run(
 }
 
 fn get_task(task_id: &TaskId, db: &Database) -> Result<Task> {
-    db.get_task(task_id)
-        .cloned()
-        .ok_or_else(|| anyhow!("Task not found: {task_id}"))
+    db.get_task(task_id).cloned().ok_or_else(|| {
+        CoreError::task_not_found(task_id.to_string(), format!("Task not found: {task_id}")).into()
+    })
 }
 
 fn get_goal(
@@ -101,7 +102,9 @@ fn get_goal(
 ) -> Result<GoalStatus> {
     let goal = db
         .get_goal(goal_id)
-        .ok_or_else(|| anyhow!("Goal not found: {goal_id}"))?
+        .ok_or_else(|| {
+            CoreError::goal_not_found(goal_id.to_string(), format!("Goal not found: {goal_id}"))
+        })?
         .clone();
 
     let tasks: Vec<Task> = db

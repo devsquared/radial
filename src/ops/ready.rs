@@ -1,8 +1,9 @@
 use std::collections::BTreeMap;
 
-use anyhow::{Result, anyhow};
+use anyhow::Result;
 
 use crate::db::Database;
+use crate::error::CoreError;
 use crate::id::GoalId;
 use crate::models::{Priority, Task, TaskState};
 use crate::ops::task::tags_matching;
@@ -16,8 +17,9 @@ pub fn run(
     tag_filter: &BTreeMap<String, String>,
     db: &Database,
 ) -> Result<Vec<(Task, Option<Task>)>> {
-    db.get_goal(goal_id)
-        .ok_or_else(|| anyhow!("Goal not found: {goal_id}"))?;
+    db.get_goal(goal_id).ok_or_else(|| {
+        CoreError::goal_not_found(goal_id.to_string(), format!("Goal not found: {goal_id}"))
+    })?;
 
     let mut tasks: Vec<(Task, Option<Task>)> = db
         .list_tasks(goal_id)
