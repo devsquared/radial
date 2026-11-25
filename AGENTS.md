@@ -45,8 +45,8 @@ All three checks below must pass before any commit. Run them in this order:
 
 ```bash
 cargo fmt --all
-cargo clippy --all-targets -- -D warnings -W clippy::pedantic
-cargo nextest run --all-targets
+cargo clippy --workspace --all-targets -- -D warnings -W clippy::pedantic
+cargo nextest run --workspace --all-targets
 ```
 
 If any check fails, fix the issue and re-run from that step. Do not commit until
@@ -95,35 +95,54 @@ Dev dependencies:
 
 ## File Structure
 
+The workspace has two crates: `radial-core` (the library — models, persistence,
+operations) and the root `radial` package (the `rd` CLI binary, a thin shell over
+`radial-core`). `radial-core` cannot depend on `clap`, `console`, or the CLI crate's
+`cli.rs`/`output.rs` — that boundary is enforced by the crate split itself, not a lint.
+
 ```
 radial/
+├── radial-core/
+│   ├── src/
+│   │   ├── lib.rs         # Public API surface, .radial dir resolution
+│   │   ├── db.rs          # TOML persistence layer
+│   │   ├── duration.rs    # Human-readable duration parsing
+│   │   ├── error.rs       # Typed CoreError with stable codes
+│   │   ├── id.rs          # ID generation
+│   │   ├── helpers.rs     # Fuzzy ID matching
+│   │   ├── models/
+│   │   │   ├── mod.rs
+│   │   │   ├── goal.rs     # Goal model and state machine
+│   │   │   ├── task.rs     # Task model and state machine
+│   │   │   ├── contract.rs # receives/produces/verify(_cmd) contract
+│   │   │   ├── outcome.rs  # Task completion result
+│   │   │   └── comment.rs  # Task comments
+│   │   └── ops/
+│   │       ├── mod.rs
+│   │       ├── clean.rs    # rd clean / rd restore's counterpart
+│   │       ├── compact.rs  # rd compact analyze/apply
+│   │       ├── edit.rs     # rd edit goal/task
+│   │       ├── goal.rs     # rd goal create/list/cancel
+│   │       ├── init.rs     # rd init
+│   │       ├── list.rs     # rd list
+│   │       ├── prep.rs     # rd prep (+ prep.md, the embedded prompt text)
+│   │       ├── ready.rs    # rd ready
+│   │       ├── restore.rs  # rd restore
+│   │       ├── show.rs     # rd show
+│   │       ├── status.rs   # rd status
+│   │       ├── task.rs     # rd task create/start/complete/fail/retry/.../comment
+│   │       └── verify.rs   # verify_cmd execution
+│   ├── tests/
+│   │   └── library_api.rs # Drives radial-core directly, not through the CLI
+│   └── Cargo.toml
 ├── src/
-│   ├── main.rs           # Entry point
-│   ├── lib.rs            # Core logic, radial dir resolution, command dispatch
-│   ├── cli.rs            # Clap CLI definitions
-│   ├── db.rs             # TOML persistence layer
-│   ├── duration.rs       # Human-readable duration parsing
-│   ├── id.rs             # ID generation
-│   ├── helpers.rs         # Fuzzy ID matching
-│   ├── output.rs         # Terminal and JSON rendering
-│   ├── models/
-│   │   ├── mod.rs
-│   │   ├── goal.rs       # Goal model and state machine
-│   │   ├── task.rs       # Task model and state machine
-│   │   ├── contract.rs   # receives/produces/verify contract
-│   │   ├── outcome.rs    # Task completion result
-│   │   └── comment.rs    # Task comments
-│   └── commands/
-│       ├── mod.rs
-│       ├── init.rs       # rd init
-│       ├── goal.rs       # rd goal create/list
-│       ├── task.rs       # rd task create/list/start/complete/fail/retry/comment
-│       ├── status.rs     # rd status
-│       ├── ready.rs      # rd ready
-│       └── prep.rs       # rd prep
+│   ├── main.rs            # Entry point
+│   ├── lib.rs             # Command dispatch, thin over radial-core
+│   ├── cli.rs             # Clap CLI definitions
+│   └── output.rs          # Terminal and JSON rendering
 ├── tests/
-│   └── integration_test.rs
-├── Cargo.toml
+│   └── integration_test.rs # Drives the compiled `rd` binary end to end
+├── Cargo.toml              # Workspace manifest + the `radial` (rd) package
 └── AGENTS.md
 ```
 

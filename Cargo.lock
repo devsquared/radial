@@ -447,12 +447,25 @@ dependencies = [
  "clap",
  "clap_complete",
  "console",
+ "jiff",
+ "radial-core",
+ "rstest",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "toml",
+]
+
+[[package]]
+name = "radial-core"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
  "fs2",
  "jiff",
  "nanoid",
  "rstest",
  "serde",
- "serde_json",
  "strsim",
  "strum",
  "tempfile",

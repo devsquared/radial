@@ -1,7 +1,7 @@
 use clap::{Parser, Subcommand};
 use clap_complete::Shell;
 
-use crate::models::Priority;
+use radial_core::Priority;
 
 #[derive(Parser)]
 #[command(name = "rd")]

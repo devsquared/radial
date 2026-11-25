@@ -1,9 +1,9 @@
 //! Drives radial purely as a library, through `ops` alone, to prove the crate
 //! is usable as a dependency and not only via the `rd` binary.
 
-use radial::db::Database;
-use radial::models::{GoalState, Priority, TaskState};
-use radial::ops;
+use radial_core::db::Database;
+use radial_core::models::{GoalState, Priority, TaskState};
+use radial_core::ops;
 use std::collections::BTreeMap;
 use std::fs;
 use tempfile::TempDir;
