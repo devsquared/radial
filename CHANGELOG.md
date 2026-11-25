@@ -3,6 +3,36 @@
 All notable changes to this project are documented in this file.
 Generated from [conventional commits](https://www.conventionalcommits.org/) with [git-cliff](https://git-cliff.org/).
 
+## [0.2.0] - 2026-11-25
+
+### Bug Fixes
+
+- Resolve display refs on goal cancel and add --version
+- Satisfy clippy::assert_is_empty on CI's current stable toolchain
+- Stop auto-compacting tasks on complete
+- Make goal metrics a single source of truth and dedupe JSON metrics key
+- Edit task blocked-by semantics and recompute state on change
+- Retry returns a failed task to pending, not in_progress
+- Canonicalize TaskState/GoalState/Priority to snake_case
+- Ci/release.sh version bump silently no-ops on macOS sed
+
+### Documentation
+
+- Check for AI attribution lines before pushing
+
+### Features
+
+- Add submit/accept/reject review flow using Verifying state
+- Subtask effective blockers and --force override on parent ops
+- Add tags on goals and tasks
+- Typed CoreError enum with stable error codes
+- Executable verify_cmd gating task complete
+- Per-record version counter on Goal/Task for watcher-friendliness
+- Wrap --json output in a schema_version envelope
+
+### Testing
+
+- Cover the lock-release/reacquire behavior around verify_cmd
 ## [0.1.0] - 2026-09-02
 
 ### Bug Fixes
