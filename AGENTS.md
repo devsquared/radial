@@ -77,8 +77,8 @@ the message, not just deleting the line in isolation) before the push goes out.
 
 ## Dependencies
 
-- `clap` (derive) — CLI parsing
-- `serde` + `serde_json` — serialization, JSON output for models
+`radial-core` (the library):
+- `serde` — serialization
 - `toml` — TOML persistence
 - `nanoid` — short IDs
 - `jiff` — timestamps
@@ -86,10 +86,17 @@ the message, not just deleting the line in isolation) before the push goes out.
 - `fs2` — file locking for atomic writes
 - `strsim` — fuzzy ID matching
 - `strum` — enum derive macros
-- `console` — terminal colors and styling
-- `textwrap` — text wrapping for output formatting
+- `thiserror` — typed `CoreError`
 
-Dev dependencies:
+`radial` (the `rd` CLI, depends on `radial-core`):
+- `clap` (derive) + `clap_complete` — CLI parsing and shell completions
+- `serde` + `serde_json` — JSON output
+- `anyhow` — error handling
+- `jiff` — timestamps (`rd task release --stale`)
+- `console` — terminal colors and styling
+- `rmcp` + `schemars` + `tokio` — the `rd mcp` stdio server
+
+Dev dependencies (both crates):
 - `tempfile` — temporary directories for tests
 - `rstest` — parameterized tests
 
@@ -97,8 +104,8 @@ Dev dependencies:
 
 The workspace has two crates: `radial-core` (the library — models, persistence,
 operations) and the root `radial` package (the `rd` CLI binary, a thin shell over
-`radial-core`). `radial-core` cannot depend on `clap`, `console`, or the CLI crate's
-`cli.rs`/`output.rs` — that boundary is enforced by the crate split itself, not a lint.
+`radial-core`). `radial-core` cannot depend on `clap`, `console`, `rmcp`, or the CLI crate's
+`cli.rs`/`output.rs`/`mcp.rs` — that boundary is enforced by the crate split itself, not a lint.
 
 ```
 radial/
@@ -139,6 +146,7 @@ radial/
 │   ├── main.rs            # Entry point
 │   ├── lib.rs             # Command dispatch, thin over radial-core
 │   ├── cli.rs             # Clap CLI definitions
+│   ├── mcp.rs             # rd mcp: ops exposed as MCP tools over stdio
 │   └── output.rs          # Terminal and JSON rendering
 ├── tests/
 │   └── integration_test.rs # Drives the compiled `rd` binary end to end
