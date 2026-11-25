@@ -5,17 +5,16 @@ use anyhow::Result;
 use console::style;
 use serde::Serialize;
 
-use crate::id::TaskId;
-use crate::models::{Goal, Task};
-use crate::ops::clean::CleanResult;
-use crate::ops::compact::CompactCandidate;
-use crate::ops::goal::GoalCancelResult;
-use crate::ops::init::InitResult;
-use crate::ops::list::GoalWithTasks;
-use crate::ops::show::ShowResult;
-use crate::ops::status::{GoalSummary, StatusResult};
-use crate::ops::task::{CancelResult, CompleteResult};
-use crate::ops::verify::VerifyResult;
+use radial_core::ops::clean::CleanResult;
+use radial_core::ops::compact::CompactCandidate;
+use radial_core::ops::goal::GoalCancelResult;
+use radial_core::ops::init::InitResult;
+use radial_core::ops::list::GoalWithTasks;
+use radial_core::ops::show::ShowResult;
+use radial_core::ops::status::{GoalSummary, StatusResult};
+use radial_core::ops::task::{CancelResult, CompleteResult};
+use radial_core::ops::verify::VerifyResult;
+use radial_core::{Goal, Task, TaskId};
 
 /// Options that control how output is rendered.
 pub struct RenderOptions {
@@ -820,7 +819,10 @@ fn status_task(task: &Task, opts: &RenderOptions) -> Result<()> {
     })
 }
 
-fn status_goal(goal_status: &crate::ops::status::GoalStatus, opts: &RenderOptions) -> Result<()> {
+fn status_goal(
+    goal_status: &radial_core::ops::status::GoalStatus,
+    opts: &RenderOptions,
+) -> Result<()> {
     let desc_w = opts.desc_width(49);
     json_or(goal_status, opts, |w| {
         let goal = goal_status.goal();
@@ -1049,7 +1051,7 @@ fn show_task(task: &Task, opts: &RenderOptions) -> Result<()> {
 fn show_goal(
     goal: &Goal,
     tasks: &[Task],
-    metrics: &crate::models::Metrics,
+    metrics: &radial_core::Metrics,
     opts: &RenderOptions,
 ) -> Result<()> {
     // Wrap in a struct for JSON serialization. `computed_metrics` is named
@@ -1060,7 +1062,7 @@ fn show_goal(
         #[serde(flatten)]
         goal: &'a Goal,
         tasks: &'a [Task],
-        computed_metrics: &'a crate::models::Metrics,
+        computed_metrics: &'a radial_core::Metrics,
     }
     let detail = GoalDetail {
         goal,
@@ -1229,7 +1231,7 @@ pub fn list(results: &[GoalWithTasks], opts: &RenderOptions) -> Result<()> {
         #[serde(flatten)]
         goal: &'a Goal,
         tasks: &'a [Task],
-        metrics: &'a crate::models::Metrics,
+        metrics: &'a radial_core::Metrics,
     }
 
     let entries: Vec<GoalEntry> = results

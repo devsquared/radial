@@ -25,14 +25,14 @@ Run them locally, in this order, before opening a PR:
 
 ```bash
 cargo fmt --all
-cargo clippy --all-targets -- -D warnings -W clippy::pedantic
-cargo nextest run --all-targets
+cargo clippy --workspace --all-targets -- -D warnings -W clippy::pedantic
+cargo nextest run --workspace --all-targets
 ```
 
-If you touch `src/models`, `src/db.rs`, `src/ops`, `src/id.rs`, `src/helpers.rs`, or
-`src/duration.rs`, CI also runs `./ci/check-seam.sh`, which fails if that core code
-pulls in a shell-only dependency (`clap`, `console`, `crate::cli`, `crate::output`).
-These modules are the library-consumer surface and must stay free of CLI concerns.
+The library-consumer surface (`models`, `db.rs`, `ops`, `id.rs`, `helpers.rs`,
+`duration.rs`) lives in its own `radial-core` crate, so it can't pull in a shell-only
+dependency (`clap`, `console`) or reach back into the `rd` CLI crate's code
+(`cli.rs`, `output.rs`) — that would be a compile error, not just a lint.
 
 ## Commit messages and PR titles
 
