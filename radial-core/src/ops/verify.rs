@@ -32,9 +32,9 @@ pub struct VerifyResult {
     pub passed: bool,
     /// The process's exit code, or `None` if it was killed for timing out.
     pub exit_code: Option<i32>,
-    /// The last [`TAIL_BYTES`] of stdout.
+    /// The last `TAIL_BYTES` of stdout.
     pub stdout_tail: String,
-    /// The last [`TAIL_BYTES`] of stderr.
+    /// The last `TAIL_BYTES` of stderr.
     pub stderr_tail: String,
     /// Wall-clock time the command ran for.
     pub duration_ms: u64,
