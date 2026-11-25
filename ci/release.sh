@@ -42,8 +42,10 @@ fi
 
 echo "releasing ${tag}"
 
-sed -i.bak "0,/^version = \".*\"/s//version = \"${version}\"/" Cargo.toml
-rm -f Cargo.toml.bak
+awk -v ver="$version" '
+  !done && /^version = "/ { print "version = \"" ver "\""; done=1; next }
+  { print }
+' Cargo.toml > Cargo.toml.tmp && mv Cargo.toml.tmp Cargo.toml
 cargo update --workspace --offline --quiet || cargo update --workspace --quiet
 
 git-cliff --tag "$tag" -o CHANGELOG.md
