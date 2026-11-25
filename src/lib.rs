@@ -688,6 +688,11 @@ fn run(cli: Cli) -> Result<()> {
                 std::process::exit(1);
             }
         }
+        Commands::Migrate { json } => {
+            let (mut db, _guard) = ensure_initialized_for_write()?;
+            let report = ops::migrate::run(&mut db)?;
+            output::migrate(&report, &RenderOptions::new().json(json))
+        }
         Commands::Mcp { allow_tool } => {
             let allowed_tools = (!allow_tool.is_empty()).then(|| allow_tool.into_iter().collect());
             tokio::runtime::Runtime::new()

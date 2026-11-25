@@ -169,6 +169,19 @@ pub enum Commands {
         json: bool,
     },
 
+    /// Rewrite every goal/task file once to normalize spelling and
+    /// materialize new default fields
+    ///
+    /// A no-op-unless-needed command: a file whose canonical serialized
+    /// form already matches what's on disk is left untouched, so re-running
+    /// this on an already-current directory writes nothing. Refuses if the
+    /// directory doesn't parse cleanly, same as every other write command.
+    Migrate {
+        /// Output as JSON
+        #[arg(long)]
+        json: bool,
+    },
+
     /// Run radial as an MCP (Model Context Protocol) server over stdio
     ///
     /// Requires an already-initialized `.radial/` directory in the current

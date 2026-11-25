@@ -32,6 +32,7 @@ Task orchestration for LLM agents. Break down goals into tracked, contract-bound
 - **Agent onboarding** — `rd prep` outputs a usage guide you can drop straight into a prompt
 - **MCP server** — `rd mcp` exposes the same operations as MCP tools over stdio, plus `get_my_work` for finding the next unblocked task in one call; `--allow-tool` scopes a session to a subset
 - **Health check** — `rd doctor` catches a missing directory, a stuck lock, an unparseable file, or a dangling goal/task reference in one pass, with a non-zero exit code for scripting
+- **Migration** — `rd migrate` normalizes every file to its current canonical form (spelling, new default fields) in one pass, touching nothing that's already current
 
 ## Overview
 
@@ -181,6 +182,7 @@ walkthrough aimed at agents. Almost every command also accepts `--json` for mach
 | Command | Description |
 |---------|-------------|
 | `rd doctor` | Point-in-time health check: `.radial/` exists, the write lock is free, every goal/task file parses, no dangling goal/task reference. Exits non-zero if anything's wrong |
+| `rd migrate` | Rewrite every goal/task file once to normalize spelling and materialize new default fields. No-op-unless-needed: a file whose canonical form already matches what's on disk is left untouched. Refuses if the directory doesn't parse cleanly |
 
 #### Agent onboarding
 

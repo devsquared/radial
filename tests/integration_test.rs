@@ -4653,3 +4653,84 @@ fn test_doctor_catches_a_dangling_blocked_by_reference_and_exits_nonzero() {
     assert!(stdout.contains("orphaned references"));
     assert!(stdout.contains("doesnotexist"));
 }
+
+#[test]
+fn test_migrate_is_a_no_op_on_a_freshly_created_goal() {
+    let env = TestEnv::new();
+    env.run(&["init"]).expect("Init failed");
+    env.run(&["goal", "create", "Migrate smoke test"])
+        .expect("Create goal failed");
+
+    let output = env.run(&["migrate"]).expect("rd migrate failed");
+    assert!(output.contains("Nothing to migrate"));
+
+    let json_output = env
+        .run(&["migrate", "--json"])
+        .expect("rd migrate --json failed");
+    let parsed = parse_json(&json_output);
+    assert_eq!(parsed["goals_checked"], 1);
+    assert_eq!(parsed["rewritten_files"], serde_json::json!([]));
+}
+
+#[test]
+fn test_migrate_normalizes_a_legacy_enum_spelling_and_is_then_idempotent() {
+    let env = TestEnv::new();
+    env.run(&["init"]).expect("Init failed");
+    let goal_output = env
+        .run(&["goal", "create", "Migrate normalization test"])
+        .expect("Create goal failed");
+    let goal_id = extract_created_id(&goal_output, "Created goal:");
+
+    // Hand-edit the persisted file to the legacy, non-canonical spelling
+    // that #[serde(alias = "inprogress")] still accepts on read.
+    let goal_path = env
+        .work_dir
+        .join(".radial")
+        .join(&goal_id)
+        .join("goal.toml");
+    let content = std::fs::read_to_string(&goal_path).expect("failed to read goal file");
+    let legacy = content.replace("state = \"pending\"", "state = \"inprogress\"");
+    std::fs::write(&goal_path, &legacy).expect("failed to write legacy-spelled goal file");
+
+    let output = env.run(&["migrate", "--json"]).expect("rd migrate failed");
+    let parsed = parse_json(&output);
+    let rewritten_files = parsed["rewritten_files"].as_array().unwrap();
+    assert_eq!(rewritten_files.len(), 1);
+    assert!(
+        rewritten_files[0]
+            .as_str()
+            .unwrap()
+            .ends_with(&format!("{goal_id}/goal.toml"))
+    );
+
+    let rewritten = std::fs::read_to_string(&goal_path).expect("failed to read rewritten file");
+    assert!(rewritten.contains("state = \"in_progress\""));
+    assert!(!rewritten.contains("inprogress"));
+
+    // Running again immediately afterward is a true no-op.
+    let output = env.run(&["migrate"]).expect("rd migrate failed");
+    assert!(output.contains("Nothing to migrate"));
+}
+
+#[test]
+fn test_migrate_refuses_on_a_directory_that_does_not_parse_cleanly() {
+    let env = TestEnv::new();
+    env.run(&["init"]).expect("Init failed");
+    let goal_output = env
+        .run(&["goal", "create", "Migrate refusal test"])
+        .expect("Create goal failed");
+    let goal_id = extract_created_id(&goal_output, "Created goal:");
+
+    let goal_path = env
+        .work_dir
+        .join(".radial")
+        .join(&goal_id)
+        .join("goal.toml");
+    std::fs::write(&goal_path, "not valid toml {{{").expect("failed to corrupt goal file");
+
+    let result = env.run(&["migrate"]);
+    assert!(
+        result.is_err(),
+        "migrate must refuse on an unparseable directory"
+    );
+}
