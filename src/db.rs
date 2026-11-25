@@ -229,18 +229,54 @@ impl Database {
             .join(format!("{}.toml", task.id()))
     }
 
-    /// Serialize and atomically write a goal to disk.
-    pub fn save_goal(&self, goal: &Goal) -> Result<()> {
+    /// Serialize and atomically write a goal to disk, bumping its version
+    /// counter first so every write — including the caller's in-memory copy
+    /// — carries the new value.
+    pub fn save_goal(&self, goal: &mut Goal) -> Result<()> {
+        goal.bump_version();
         let path = self.goal_path(goal);
         let content = toml::to_string(goal).context("Failed to serialize goal")?;
         atomic_write(&path, content.as_bytes())
     }
 
-    /// Serialize and atomically write a task to disk.
-    pub fn save_task(&self, task: &Task) -> Result<()> {
+    /// Serialize and atomically write a task to disk, bumping its version
+    /// counter first so every write — including the caller's in-memory copy
+    /// — carries the new value.
+    pub fn save_task(&self, task: &mut Task) -> Result<()> {
+        task.bump_version();
         let path = self.task_path(task);
         let content = toml::to_string(task).context("Failed to serialize task")?;
         atomic_write(&path, content.as_bytes())
+    }
+
+    /// Persist a goal already in memory: clones it from the map, writes it
+    /// to disk via `save_goal` (bumping its version), then writes that same
+    /// bumped clone back into the map. The standard way `ops` functions
+    /// finalize a mutation made through `get_goal_mut`, so a later
+    /// `get_goal` in the same process sees the version `save_goal` just
+    /// wrote rather than the pre-bump copy still sitting in the map.
+    pub fn persist_goal(&mut self, goal_id: &GoalId) -> Result<Goal> {
+        let goal = self
+            .goals
+            .get(goal_id)
+            .ok_or_else(|| anyhow!("Goal not found: {goal_id}"))?;
+        let mut goal = goal.clone();
+        self.save_goal(&mut goal)?;
+        self.goals.insert(goal_id.clone(), goal.clone());
+        Ok(goal)
+    }
+
+    /// Persist a task already in memory, the same way `persist_goal` does
+    /// for goals.
+    pub fn persist_task(&mut self, task_id: &TaskId) -> Result<Task> {
+        let task = self
+            .tasks
+            .get(task_id)
+            .ok_or_else(|| anyhow!("Task not found: {task_id}"))?;
+        let mut task = task.clone();
+        self.save_task(&mut task)?;
+        self.tasks.insert(task_id.clone(), task.clone());
+        Ok(task)
     }
 
     /// Load all data from the per-entity TOML files into memory.
@@ -310,8 +346,9 @@ impl Database {
     // Goal operations
 
     /// Create a new goal directory, persist the goal, and add it to memory.
-    /// Fails if a goal with the same ID already exists.
-    pub fn create_goal(&mut self, goal: Goal) -> Result<()> {
+    /// Fails if a goal with the same ID already exists. Returns the goal as
+    /// persisted, including its version counter bumped by the initial save.
+    pub fn create_goal(&mut self, mut goal: Goal) -> Result<Goal> {
         if self.goals.contains_key(goal.id()) {
             bail!("Goal already exists: {}", goal.id());
         }
@@ -319,10 +356,10 @@ impl Database {
         let goal_dir = self.path.join(goal.id().as_ref());
         fs::create_dir_all(&goal_dir).context("Failed to create goal directory")?;
 
-        self.save_goal(&goal)?;
-        self.goals.insert(goal.id().clone(), goal);
+        self.save_goal(&mut goal)?;
+        self.goals.insert(goal.id().clone(), goal.clone());
 
-        Ok(())
+        Ok(goal)
     }
 
     /// Look up a goal by exact ID.
@@ -480,16 +517,17 @@ impl Database {
     // Task operations
 
     /// Persist a new task and add it to memory.
-    /// Fails if a task with the same ID already exists.
-    pub fn create_task(&mut self, task: Task) -> Result<()> {
+    /// Fails if a task with the same ID already exists. Returns the task as
+    /// persisted, including its version counter bumped by the initial save.
+    pub fn create_task(&mut self, mut task: Task) -> Result<Task> {
         if self.tasks.contains_key(task.id()) {
             bail!("Task already exists: {}", task.id());
         }
 
-        self.save_task(&task)?;
-        self.tasks.insert(task.id().clone(), task);
+        self.save_task(&mut task)?;
+        self.tasks.insert(task.id().clone(), task.clone());
 
-        Ok(())
+        Ok(task)
     }
 
     /// Look up a task by exact ID.
@@ -583,8 +621,7 @@ impl Database {
         }
 
         parent.set_derived_state(derived);
-        let parent = parent.clone();
-        self.save_task(&parent)?;
+        self.persist_task(parent_id)?;
 
         Ok(Some(derived))
     }
@@ -665,8 +702,8 @@ impl Database {
             .get_goal_mut(goal_id)
             .ok_or_else(|| anyhow!("Goal not found: {goal_id}"))?;
         goal.set_metrics(metrics);
-        let goal = goal.clone();
-        self.save_goal(&goal)
+        self.persist_goal(goal_id)?;
+        Ok(())
     }
 
     /// Resolve a goal ID from a prefix or full ID string.
@@ -1032,8 +1069,8 @@ mod tests {
     fn save_goal_persists_to_disk(db: (TempDir, Database)) {
         let (dir, db) = db;
         fs::create_dir_all(dir.path().join("g1")).unwrap();
-        let goal = make_goal("g1");
-        db.save_goal(&goal).unwrap();
+        let mut goal = make_goal("g1");
+        db.save_goal(&mut goal).unwrap();
 
         let goal_path = dir.path().join("g1").join("goal.toml");
         assert!(goal_path.exists());
@@ -1050,7 +1087,7 @@ mod tests {
         let (dir, db) = db_with_goal_and_task;
         let mut goal = db.get_goal(&goal_id("g1")).unwrap().clone();
         goal.mark_in_progress();
-        db.save_goal(&goal).unwrap();
+        db.save_goal(&mut goal).unwrap();
 
         let goal_path = dir.path().join("g1").join("goal.toml");
         let loaded: Goal = toml::from_str(&std::fs::read_to_string(goal_path).unwrap()).unwrap();
@@ -1063,8 +1100,8 @@ mod tests {
     fn save_task_persists_to_disk(db: (TempDir, Database)) {
         let (dir, db) = db;
         fs::create_dir_all(dir.path().join("g1")).unwrap();
-        let task = make_task("t1", "g1", TaskState::Pending);
-        db.save_task(&task).unwrap();
+        let mut task = make_task("t1", "g1", TaskState::Pending);
+        db.save_task(&mut task).unwrap();
 
         let task_path = dir.path().join("g1").join("t1.toml");
         assert!(task_path.exists());
@@ -1081,11 +1118,127 @@ mod tests {
         let (dir, db) = db_with_goal_and_task;
         let mut task = db.get_task(&task_id("t1")).unwrap().clone();
         task.transition_from_any(&[TaskState::Pending], TaskState::InProgress);
-        db.save_task(&task).unwrap();
+        db.save_task(&mut task).unwrap();
 
         let task_path = dir.path().join("g1").join("t1.toml");
         let loaded: Task = toml::from_str(&std::fs::read_to_string(task_path).unwrap()).unwrap();
         assert_eq!(loaded.state(), TaskState::InProgress);
+    }
+
+    // -- version counter --
+
+    // A fresh Goal/Task starts at version 0; save_goal/save_task bump it to 1
+    // on the first write and the caller's copy (not just the disk copy)
+    // reflects the new value immediately.
+    #[rstest]
+    fn save_goal_bumps_version_on_caller_copy(db: (TempDir, Database)) {
+        let (dir, db) = db;
+        fs::create_dir_all(dir.path().join("g1")).unwrap();
+        let mut goal = make_goal("g1");
+        assert_eq!(goal.version(), 0);
+        db.save_goal(&mut goal).unwrap();
+        assert_eq!(goal.version(), 1);
+        db.save_goal(&mut goal).unwrap();
+        assert_eq!(goal.version(), 2);
+
+        let loaded: Goal = toml::from_str(
+            &std::fs::read_to_string(dir.path().join("g1").join("goal.toml")).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(loaded.version(), 2);
+    }
+
+    #[rstest]
+    fn save_task_bumps_version_on_caller_copy(db: (TempDir, Database)) {
+        let (dir, db) = db;
+        fs::create_dir_all(dir.path().join("g1")).unwrap();
+        let mut task = make_task("t1", "g1", TaskState::Pending);
+        assert_eq!(task.version(), 0);
+        db.save_task(&mut task).unwrap();
+        assert_eq!(task.version(), 1);
+        db.save_task(&mut task).unwrap();
+        assert_eq!(task.version(), 2);
+
+        let loaded: Task = toml::from_str(
+            &std::fs::read_to_string(dir.path().join("g1").join("t1.toml")).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(loaded.version(), 2);
+    }
+
+    // create_goal/create_task persist through save_goal/save_task, so the
+    // first version is 1, not 0, even for a brand-new record.
+    #[rstest]
+    fn create_goal_returns_version_one(db: (TempDir, Database)) {
+        let (_dir, mut db) = db;
+        let goal = db.create_goal(make_goal("g1")).unwrap();
+        assert_eq!(goal.version(), 1);
+        assert_eq!(db.get_goal(&goal_id("g1")).unwrap().version(), 1);
+    }
+
+    #[rstest]
+    fn create_task_returns_version_one(db: (TempDir, Database)) {
+        let (_dir, mut db) = db;
+        db.create_goal(make_goal("g1")).unwrap();
+        let task = db
+            .create_task(make_task("t1", "g1", TaskState::Pending))
+            .unwrap();
+        assert_eq!(task.version(), 1);
+        assert_eq!(db.get_task(&task_id("t1")).unwrap().version(), 1);
+    }
+
+    // persist_task must write the bumped version back into the in-memory
+    // map, not just the disk file — otherwise a later get_task in the same
+    // process (as every ops:: function does after mutating and persisting)
+    // would see the pre-bump version. Regression test for exactly that bug.
+    #[rstest]
+    fn persist_task_updates_in_memory_version(db_with_goal_and_task: (TempDir, Database)) {
+        let (_dir, mut db) = db_with_goal_and_task;
+        // create_task already persisted once, so this starts at 1.
+        assert_eq!(db.get_task(&task_id("t1")).unwrap().version(), 1);
+
+        let persisted = db.persist_task(&task_id("t1")).unwrap();
+        assert_eq!(persisted.version(), 2);
+        assert_eq!(db.get_task(&task_id("t1")).unwrap().version(), 2);
+
+        let persisted = db.persist_task(&task_id("t1")).unwrap();
+        assert_eq!(persisted.version(), 3);
+        assert_eq!(db.get_task(&task_id("t1")).unwrap().version(), 3);
+    }
+
+    #[rstest]
+    fn persist_goal_updates_in_memory_version(db_with_goal_and_task: (TempDir, Database)) {
+        let (_dir, mut db) = db_with_goal_and_task;
+        // create_goal already persisted once, so this starts at 1.
+        assert_eq!(db.get_goal(&goal_id("g1")).unwrap().version(), 1);
+
+        let persisted = db.persist_goal(&goal_id("g1")).unwrap();
+        assert_eq!(persisted.version(), 2);
+        assert_eq!(db.get_goal(&goal_id("g1")).unwrap().version(), 2);
+    }
+
+    // A goal/task TOML file written before the version field existed omits
+    // its key entirely; parsing must default to 0 rather than failing.
+    #[rstest]
+    fn goal_version_defaults_to_zero_for_legacy_toml() {
+        let legacy = r#"
+id = "abc12345"
+description = "legacy goal"
+state = "pending"
+created_at = "2026-04-05T19:03:40.353107Z"
+updated_at = "2026-04-05T19:03:40.353107Z"
+
+[metrics]
+total_tokens = 0
+prompt_tokens = 0
+completion_tokens = 0
+elapsed_ms = 0
+task_count = 0
+tasks_completed = 0
+tasks_failed = 0
+"#;
+        let goal: Goal = toml::from_str(legacy).expect("legacy goal should parse");
+        assert_eq!(goal.version(), 0);
     }
 
     // -- get_goal / get_goal_mut --

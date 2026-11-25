@@ -127,6 +127,12 @@ pub struct Goal {
     metrics: Metrics,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     tags: BTreeMap<String, String>,
+    /// Incremented on every persisted write, so a file watcher can detect a
+    /// change without diffing the record. Defaults to 0 for records written
+    /// before this field existed; `Database::save_goal` bumps it to 1 on their
+    /// next save.
+    #[serde(default)]
+    version: u64,
 }
 
 impl Goal {
@@ -153,6 +159,7 @@ impl Goal {
             completed_at,
             metrics,
             tags: BTreeMap::new(),
+            version: 0,
         }
     }
 
@@ -206,6 +213,17 @@ impl Goal {
     /// Arbitrary key-value labels attached to the goal.
     pub fn tags(&self) -> &BTreeMap<String, String> {
         &self.tags
+    }
+
+    /// The goal's version counter, incremented on every persisted write.
+    pub fn version(&self) -> u64 {
+        self.version
+    }
+
+    /// Increment the version counter. Called by `Database::save_goal`
+    /// immediately before serializing, so every write bumps it exactly once.
+    pub(crate) fn bump_version(&mut self) {
+        self.version += 1;
     }
 
     pub(crate) fn set_metrics(&mut self, metrics: Metrics) {

@@ -24,9 +24,7 @@ pub fn goal(
     if let Some(tags) = tags {
         goal.merge_tags(tags);
     }
-    let goal = goal.clone();
-    db.save_goal(&goal)?;
-    Ok(goal)
+    db.persist_goal(goal_id)
 }
 
 /// Update a task's description, priority, contract fields, and/or
@@ -211,7 +209,5 @@ pub fn task(
         task.merge_tags(tags);
     }
 
-    let task = task.clone();
-    db.save_task(&task)?;
-    Ok(task)
+    db.persist_task(task_id)
 }

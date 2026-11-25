@@ -40,8 +40,7 @@ pub fn create(
     );
     goal.merge_tags(tags);
 
-    db.create_goal(goal.clone())?;
-    Ok(goal)
+    db.create_goal(goal)
 }
 
 /// Upsert tags onto a goal, overwriting any keys already present and
@@ -55,9 +54,7 @@ pub fn set_tags(
         CoreError::goal_not_found(goal_id.to_string(), format!("Goal not found: {goal_id}"))
     })?;
     goal.merge_tags(tags);
-    let goal = goal.clone();
-    db.save_goal(&goal)?;
-    Ok(goal)
+    db.persist_goal(goal_id)
 }
 
 /// Whether a goal's tags satisfy every key-value pair in `filter` (an empty
