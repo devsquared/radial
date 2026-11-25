@@ -71,6 +71,18 @@ impl RenderOptions {
     }
 }
 
+/// Version of the `--json` output envelope. Bump when the envelope shape
+/// itself changes (not for changes to the `data` payload underneath it).
+const JSON_SCHEMA_VERSION: u64 = 1;
+
+/// Envelope wrapping every `--json` payload so consumers can detect
+/// incompatible output shapes before parsing `data`.
+#[derive(Serialize)]
+struct JsonEnvelope<'a, T: ?Sized> {
+    schema_version: u64,
+    data: &'a T,
+}
+
 /// Print as JSON if `opts.json` is true, otherwise call `human` with a writer.
 fn json_or<T: Serialize + ?Sized>(
     value: &T,
@@ -79,7 +91,11 @@ fn json_or<T: Serialize + ?Sized>(
 ) -> Result<()> {
     let mut stdout = io::stdout().lock();
     if opts.json {
-        serde_json::to_writer_pretty(&mut stdout, value)?;
+        let envelope = JsonEnvelope {
+            schema_version: JSON_SCHEMA_VERSION,
+            data: value,
+        };
+        serde_json::to_writer_pretty(&mut stdout, &envelope)?;
         writeln!(stdout)?;
     } else {
         human(&mut stdout)?;
