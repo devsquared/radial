@@ -26,7 +26,7 @@ Task orchestration for LLM agents. Break down goals into tracked, contract-bound
 - **Git-friendly persistence** — state lives in `.radial/` as TOML files, easy to commit and diff
 - **Stealth mode** — keep `.radial/` out of version control with `rd init --stealth`
 - **Shared state** — multiple checkouts can share a radial database via redirect files
-- **JSON output** — nearly every command supports `--json` for machine-readable output, including which tasks a completion or cancellation unblocked
+- **JSON output** — nearly every command supports `--json` for machine-readable output, including which tasks a completion or cancellation unblocked; output is wrapped as `{"schema_version": 1, "data": ...}` so consumers can detect incompatible shape changes
 - **Shell completions** — `rd completions <shell>` covers bash, zsh, fish, elvish, and PowerShell
 - **Task-driven memory** — goals and tasks persist across sessions, giving agents durable context for long-running workflows
 - **Agent onboarding** — `rd prep` outputs a usage guide you can drop straight into a prompt

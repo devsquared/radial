@@ -254,7 +254,10 @@ If an agent session crashes, its claimed tasks stay in progress forever. Use the
 
 ### JSON Output
 
-Most commands accept `--json` for machine-readable output.
+Most commands accept `--json` for machine-readable output. Output is wrapped in an envelope:
+`{"schema_version": 1, "data": <payload>}`. Unwrap `data` to get the same structure the
+command would otherwise print; `schema_version` lets you detect an incompatible output shape
+before parsing it.
 
 ### Typical Workflow
 

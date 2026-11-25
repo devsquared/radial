@@ -54,6 +54,17 @@ impl TestEnv {
     }
 }
 
+/// Parse `--json` output, asserting the schema envelope, and return the
+/// unwrapped `data` payload.
+fn parse_json(output: &str) -> Value {
+    let envelope: Value = serde_json::from_str(output).expect("Should be valid JSON");
+    assert_eq!(
+        envelope["schema_version"], 1,
+        "unexpected schema_version in {envelope}"
+    );
+    envelope["data"].clone()
+}
+
 #[test]
 fn test_init_creates_radial_directory() {
     let env = TestEnv::new();
@@ -777,7 +788,7 @@ fn test_json_output_goal_list() {
     let output = env
         .run(&["goal", "list", "--json"])
         .expect("List --json failed");
-    let parsed: Value = serde_json::from_str(&output).expect("Should be valid JSON");
+    let parsed: Value = parse_json(&output);
     assert!(parsed.is_array(), "Output should be a JSON array");
     assert_eq!(parsed.as_array().unwrap().len(), 0, "Array should be empty");
 
@@ -789,7 +800,7 @@ fn test_json_output_goal_list() {
     let output = env
         .run(&["goal", "list", "--json"])
         .expect("List --json failed");
-    let parsed: Value = serde_json::from_str(&output).expect("Should be valid JSON");
+    let parsed: Value = parse_json(&output);
     assert!(parsed.is_array());
 
     let goals = parsed.as_array().unwrap();
@@ -818,7 +829,7 @@ fn test_json_output_task_list() {
     let output = env
         .run(&["task", "list", goal_id, "--json"])
         .expect("List tasks --json failed");
-    let parsed: Value = serde_json::from_str(&output).expect("Should be valid JSON");
+    let parsed: Value = parse_json(&output);
     assert!(parsed.is_array());
     assert_eq!(parsed.as_array().unwrap().len(), 0);
 
@@ -841,7 +852,7 @@ fn test_json_output_task_list() {
     let output = env
         .run(&["task", "list", goal_id, "--json"])
         .expect("List tasks --json failed");
-    let parsed: Value = serde_json::from_str(&output).expect("Should be valid JSON");
+    let parsed: Value = parse_json(&output);
     assert!(parsed.is_array());
 
     let tasks = parsed.as_array().unwrap();
@@ -882,20 +893,20 @@ fn test_json_output_task_start_and_complete() {
             "--json",
         ])
         .expect("Create task failed");
-    let created: Value = serde_json::from_str(&output).expect("Should be valid JSON");
+    let created: Value = parse_json(&output);
     let task_id = created["id"].as_str().unwrap();
 
     let output = env
         .run(&["task", "start", task_id, "--assignee", "tester", "--json"])
         .expect("Start task --json failed");
-    let started: Value = serde_json::from_str(&output).expect("Should be valid JSON");
+    let started: Value = parse_json(&output);
     assert_eq!(started["state"], "in_progress");
     assert_eq!(started["assignee"], "tester");
 
     let output = env
         .run(&["task", "complete", task_id, "--result", "Done", "--json"])
         .expect("Complete task --json failed");
-    let completed: Value = serde_json::from_str(&output).expect("Should be valid JSON");
+    let completed: Value = parse_json(&output);
     assert_eq!(completed["task"]["state"], "completed");
     assert!(completed["unblocked_task_ids"].is_array());
 }
@@ -913,7 +924,7 @@ fn test_version_counter_increments_on_every_write() {
     let output = env
         .run(&["goal", "create", "Version counter test", "--json"])
         .expect("Create goal failed");
-    let goal: Value = serde_json::from_str(&output).expect("Should be valid JSON");
+    let goal: Value = parse_json(&output);
     let goal_id = goal["id"].as_str().unwrap().to_string();
     assert_eq!(goal["version"], 1);
 
@@ -932,20 +943,20 @@ fn test_version_counter_increments_on_every_write() {
             "--json",
         ])
         .expect("Create task failed");
-    let created: Value = serde_json::from_str(&output).expect("Should be valid JSON");
+    let created: Value = parse_json(&output);
     let task_id = created["id"].as_str().unwrap().to_string();
     assert_eq!(created["version"], 1);
 
     let output = env
         .run(&["task", "start", &task_id, "--assignee", "tester", "--json"])
         .expect("Start task --json failed");
-    let started: Value = serde_json::from_str(&output).expect("Should be valid JSON");
+    let started: Value = parse_json(&output);
     assert_eq!(started["version"], 2);
 
     let output = env
         .run(&["task", "complete", &task_id, "--result", "Done", "--json"])
         .expect("Complete task --json failed");
-    let completed: Value = serde_json::from_str(&output).expect("Should be valid JSON");
+    let completed: Value = parse_json(&output);
     assert_eq!(completed["task"]["version"], 3);
 }
 
@@ -954,11 +965,11 @@ fn test_json_output_init() {
     let env = TestEnv::new();
 
     let output = env.run(&["init", "--json"]).expect("Init --json failed");
-    let init: Value = serde_json::from_str(&output).expect("Should be valid JSON");
+    let init: Value = parse_json(&output);
     assert_eq!(init["already_initialized"], false);
 
     let output = env.run(&["init", "--json"]).expect("Init --json failed");
-    let init_again: Value = serde_json::from_str(&output).expect("Should be valid JSON");
+    let init_again: Value = parse_json(&output);
     assert_eq!(init_again["already_initialized"], true);
 }
 
@@ -987,7 +998,7 @@ fn test_json_output_edit_and_task_lifecycle_mutations() {
             "--json",
         ])
         .expect("Edit goal --json failed");
-    let edited: Value = serde_json::from_str(&output).expect("Should be valid JSON");
+    let edited: Value = parse_json(&output);
     assert_eq!(edited["description"], "Renamed");
 
     let output = env
@@ -1005,7 +1016,7 @@ fn test_json_output_edit_and_task_lifecycle_mutations() {
             "--json",
         ])
         .expect("Create task failed");
-    let task: Value = serde_json::from_str(&output).expect("Should be valid JSON");
+    let task: Value = parse_json(&output);
     let task_id = task["id"].as_str().unwrap().to_string();
 
     let output = env
@@ -1018,7 +1029,7 @@ fn test_json_output_edit_and_task_lifecycle_mutations() {
             "--json",
         ])
         .expect("Edit task --json failed");
-    let edited_task: Value = serde_json::from_str(&output).expect("Should be valid JSON");
+    let edited_task: Value = parse_json(&output);
     assert_eq!(edited_task["description"], "Fail me too");
 
     env.run(&["task", "start", &task_id, "--assignee", "tester"])
@@ -1027,25 +1038,25 @@ fn test_json_output_edit_and_task_lifecycle_mutations() {
     let output = env
         .run(&["task", "fail", &task_id, "--reason", "broke", "--json"])
         .expect("Fail task --json failed");
-    let failed: Value = serde_json::from_str(&output).expect("Should be valid JSON");
+    let failed: Value = parse_json(&output);
     assert_eq!(failed["state"], "failed");
 
     let output = env
         .run(&["task", "retry", &task_id, "--json"])
         .expect("Retry task --json failed");
-    let retried: Value = serde_json::from_str(&output).expect("Should be valid JSON");
+    let retried: Value = parse_json(&output);
     assert_eq!(retried["state"], "pending");
 
     let output = env
         .run(&["task", "release", &task_id, "--json"])
         .expect("Release task --json failed");
-    let released: Value = serde_json::from_str(&output).expect("Should be valid JSON");
+    let released: Value = parse_json(&output);
     assert_eq!(released["state"], "pending");
 
     let output = env
         .run(&["task", "release", "--all-in-progress", "--json"])
         .expect("Release --all-in-progress --json failed");
-    let released_all: Value = serde_json::from_str(&output).expect("Should be valid JSON");
+    let released_all: Value = parse_json(&output);
     assert!(released_all.is_array());
 
     let output = env
@@ -1058,7 +1069,7 @@ fn test_json_output_edit_and_task_lifecycle_mutations() {
             "--json",
         ])
         .expect("Cancel task --json failed");
-    let cancelled: Value = serde_json::from_str(&output).expect("Should be valid JSON");
+    let cancelled: Value = parse_json(&output);
     assert_eq!(cancelled["task"]["state"], "cancelled");
     assert!(cancelled["unblocked_task_ids"].is_array());
     assert!(cancelled["cascaded_task_ids"].is_array());
@@ -1066,12 +1077,12 @@ fn test_json_output_edit_and_task_lifecycle_mutations() {
     let output = env
         .run(&["task", "create", &goal_id, "Delete me", "--json"])
         .expect("Create task failed");
-    let deletable: Value = serde_json::from_str(&output).expect("Should be valid JSON");
+    let deletable: Value = parse_json(&output);
     let deletable_id = deletable["id"].as_str().unwrap();
     let output = env
         .run(&["task", "delete", deletable_id, "--json"])
         .expect("Delete task --json failed");
-    let deleted: Value = serde_json::from_str(&output).expect("Should be valid JSON");
+    let deleted: Value = parse_json(&output);
     assert_eq!(deleted["id"], deletable_id);
 }
 
@@ -1105,7 +1116,7 @@ fn test_json_output_task_review_flow() {
             "--json",
         ])
         .expect("Create task failed");
-    let task: Value = serde_json::from_str(&output).expect("Should be valid JSON");
+    let task: Value = parse_json(&output);
     let task_id = task["id"].as_str().unwrap().to_string();
 
     env.run(&["task", "start", &task_id, "--assignee", "tester"])
@@ -1114,7 +1125,7 @@ fn test_json_output_task_review_flow() {
     let output = env
         .run(&["task", "submit", &task_id, "--json"])
         .expect("Submit task --json failed");
-    let submitted: Value = serde_json::from_str(&output).expect("Should be valid JSON");
+    let submitted: Value = parse_json(&output);
     assert_eq!(submitted["state"], "verifying");
     assert!(submitted["result"].is_null());
 
@@ -1128,7 +1139,7 @@ fn test_json_output_task_review_flow() {
             "--json",
         ])
         .expect("Reject task --json failed");
-    let rejected: Value = serde_json::from_str(&output).expect("Should be valid JSON");
+    let rejected: Value = parse_json(&output);
     assert_eq!(rejected["state"], "in_progress");
     assert_eq!(rejected["assignee"], "tester");
 
@@ -1145,7 +1156,7 @@ fn test_json_output_task_review_flow() {
             "--json",
         ])
         .expect("Accept task --json failed");
-    let accepted: Value = serde_json::from_str(&output).expect("Should be valid JSON");
+    let accepted: Value = parse_json(&output);
     assert_eq!(accepted["task"]["state"], "completed");
     assert_eq!(accepted["task"]["result"]["summary"], "Looks good now");
     assert!(accepted["unblocked_task_ids"].is_array());
@@ -1176,23 +1187,23 @@ fn test_json_output_goal_lifecycle_and_prep_and_compact() {
             "--json",
         ])
         .expect("Cancel goal --json failed");
-    let goal_cancelled: Value = serde_json::from_str(&output).expect("Should be valid JSON");
+    let goal_cancelled: Value = parse_json(&output);
     assert_eq!(goal_cancelled["goal"]["state"], "cancelled");
     assert!(goal_cancelled["cancelled_task_ids"].is_array());
 
     let output = env.run(&["clean", "--json"]).expect("Clean --json failed");
-    let cleaned: Value = serde_json::from_str(&output).expect("Should be valid JSON");
+    let cleaned: Value = parse_json(&output);
     assert_eq!(cleaned["candidates"], 1);
     assert_eq!(cleaned["removed"].as_array().unwrap().len(), 1);
 
     let output = env
         .run(&["restore", &goal_id, "--json"])
         .expect("Restore --json failed");
-    let restored: Value = serde_json::from_str(&output).expect("Should be valid JSON");
+    let restored: Value = parse_json(&output);
     assert_eq!(restored["id"], goal_id);
 
     let output = env.run(&["prep", "--json"]).expect("Prep --json failed");
-    let prep: Value = serde_json::from_str(&output).expect("Should be valid JSON");
+    let prep: Value = parse_json(&output);
     assert!(prep["guide"].as_str().unwrap().contains("rd"));
 
     let output = env
@@ -1210,7 +1221,7 @@ fn test_json_output_goal_lifecycle_and_prep_and_compact() {
             "--json",
         ])
         .expect("Create task failed");
-    let compactable: Value = serde_json::from_str(&output).expect("Should be valid JSON");
+    let compactable: Value = parse_json(&output);
     let compactable_id = compactable["id"].as_str().unwrap().to_string();
     env.run(&["task", "start", &compactable_id, "--assignee", "tester"])
         .expect("Start task failed");
@@ -1232,7 +1243,7 @@ fn test_json_output_goal_lifecycle_and_prep_and_compact() {
             "--json",
         ])
         .expect("Compact apply --json failed");
-    let compacted: Value = serde_json::from_str(&output).expect("Should be valid JSON");
+    let compacted: Value = parse_json(&output);
     assert_eq!(compacted["task_id"], compactable_id);
 }
 
@@ -1275,7 +1286,7 @@ fn test_json_output_status() {
     let output = env
         .run(&["status", "--json"])
         .expect("Status --json failed");
-    let parsed: Value = serde_json::from_str(&output).expect("Should be valid JSON");
+    let parsed: Value = parse_json(&output);
     assert!(parsed.is_array(), "All goals status should be an array");
     let goals = parsed.as_array().unwrap();
     assert_eq!(goals.len(), 1);
@@ -1285,7 +1296,7 @@ fn test_json_output_status() {
     let output = env
         .run(&["status", "--goal", goal_id, "--json"])
         .expect("Status --goal --json failed");
-    let parsed: Value = serde_json::from_str(&output).expect("Should be valid JSON");
+    let parsed: Value = parse_json(&output);
     assert!(parsed.is_object(), "Goal status should be an object");
     assert_eq!(parsed["id"], goal_id);
     assert!(parsed["tasks"].is_array());
@@ -1295,7 +1306,7 @@ fn test_json_output_status() {
     let output = env
         .run(&["status", "--task", task_id, "--json"])
         .expect("Status --task --json failed");
-    let parsed: Value = serde_json::from_str(&output).expect("Should be valid JSON");
+    let parsed: Value = parse_json(&output);
     assert!(parsed.is_object(), "Task status should be an object");
     assert_eq!(parsed["id"], task_id);
     assert_eq!(parsed["description"], "Status task");
@@ -1464,7 +1475,7 @@ fn test_task_comments_json_output() {
     let output = env
         .run(&["status", "--task", task_id, "--json"])
         .expect("Status --json failed");
-    let parsed: Value = serde_json::from_str(&output).expect("Should be valid JSON");
+    let parsed: Value = parse_json(&output);
     assert!(parsed["comments"].is_array());
     assert_eq!(parsed["comments"].as_array().unwrap().len(), 0);
 
@@ -1478,7 +1489,7 @@ fn test_task_comments_json_output() {
     let output = env
         .run(&["status", "--task", task_id, "--json"])
         .expect("Status --json failed");
-    let parsed: Value = serde_json::from_str(&output).expect("Should be valid JSON");
+    let parsed: Value = parse_json(&output);
     assert!(parsed["comments"].is_array());
 
     let comments = parsed["comments"].as_array().unwrap();
@@ -1492,7 +1503,7 @@ fn test_task_comments_json_output() {
     let output = env
         .run(&["show", task_id, "--json"])
         .expect("Show --json failed");
-    let parsed: Value = serde_json::from_str(&output).expect("Should be valid JSON");
+    let parsed: Value = parse_json(&output);
     let comments = parsed["comments"].as_array().unwrap();
     assert_eq!(comments.len(), 2, "Show JSON should include comments");
 }
@@ -1554,7 +1565,7 @@ fn test_task_assignee_and_release() {
     let output = env
         .run(&["show", task_id, "--json"])
         .expect("Show --json failed");
-    let parsed: Value = serde_json::from_str(&output).expect("Should be valid JSON");
+    let parsed: Value = parse_json(&output);
     assert_eq!(parsed["assignee"], "agent-1");
 
     // Release the task
@@ -1568,7 +1579,7 @@ fn test_task_assignee_and_release() {
     let output = env
         .run(&["show", task_id, "--json"])
         .expect("Show --json failed");
-    let parsed: Value = serde_json::from_str(&output).expect("Should be valid JSON");
+    let parsed: Value = parse_json(&output);
     assert!(
         parsed["assignee"].is_null(),
         "Assignee should be null after release"
@@ -1711,7 +1722,7 @@ fn test_task_release_from_failed() {
     let output = env
         .run(&["show", task_id, "--json"])
         .expect("Show --json failed");
-    let parsed: Value = serde_json::from_str(&output).expect("Should be valid JSON");
+    let parsed: Value = parse_json(&output);
     assert_eq!(parsed["state"], "pending");
     assert!(parsed["assignee"].is_null());
 }
@@ -1885,7 +1896,7 @@ fn test_compact_analyze_json() {
     let output = env
         .run(&["compact", "analyze", "--json"])
         .expect("Compact analyze --json failed");
-    let parsed: Value = serde_json::from_str(&output).expect("Should be valid JSON");
+    let parsed: Value = parse_json(&output);
     assert!(parsed.is_array());
     let candidates = parsed.as_array().unwrap();
     assert_eq!(candidates.len(), 1);
@@ -1906,14 +1917,14 @@ fn test_compact_analyze_filter_by_goal() {
     let output = env
         .run(&["compact", "analyze", "--json"])
         .expect("Analyze all failed");
-    let parsed: Value = serde_json::from_str(&output).unwrap();
+    let parsed: Value = parse_json(&output);
     assert_eq!(parsed.as_array().unwrap().len(), 2);
 
     // Filter to goal 1
     let output = env
         .run(&["compact", "analyze", "--goal", &goal_id_1, "--json"])
         .expect("Analyze filtered failed");
-    let parsed: Value = serde_json::from_str(&output).unwrap();
+    let parsed: Value = parse_json(&output);
     let candidates = parsed.as_array().unwrap();
     assert_eq!(candidates.len(), 1);
     assert_eq!(candidates[0]["id"], task_id_1);
@@ -1952,7 +1963,7 @@ fn test_compact_apply_success() {
     let output = env
         .run(&["show", &task_id, "--json"])
         .expect("Show --json failed");
-    let parsed: Value = serde_json::from_str(&output).expect("Should be valid JSON");
+    let parsed: Value = parse_json(&output);
     assert_eq!(parsed["compacted"], true);
     assert_eq!(
         parsed["summary"],
@@ -1988,7 +1999,7 @@ fn test_complete_preserves_description_and_contract() {
     let output = env
         .run(&["show", &task_id, "--json"])
         .expect("Show --json failed");
-    let parsed: Value = serde_json::from_str(&output).expect("Should be valid JSON");
+    let parsed: Value = parse_json(&output);
     assert_eq!(parsed["compacted"], false);
     assert_eq!(parsed["description"], "Keep task");
     assert!(!parsed["contract"].is_null());
@@ -2045,7 +2056,7 @@ fn test_compact_not_in_analyze_after_compaction() {
     let output = env
         .run(&["compact", "analyze", "--json"])
         .expect("Analyze failed");
-    let parsed: Value = serde_json::from_str(&output).unwrap();
+    let parsed: Value = parse_json(&output);
     assert_eq!(parsed.as_array().unwrap().len(), 1);
 
     // Compact it manually
@@ -2056,7 +2067,7 @@ fn test_compact_not_in_analyze_after_compaction() {
     let output = env
         .run(&["compact", "analyze", "--json"])
         .expect("Analyze failed");
-    let parsed: Value = serde_json::from_str(&output).unwrap();
+    let parsed: Value = parse_json(&output);
     assert_eq!(parsed.as_array().unwrap().len(), 0);
 }
 
@@ -2225,7 +2236,7 @@ fn test_edit_task_add_blocked_by_incomplete_blocker_sets_blocked() {
     let output = env
         .run(&["show", &dependent, "--json"])
         .expect("Show dependent failed");
-    let json: Value = serde_json::from_str(&output).expect("Invalid JSON");
+    let json: Value = parse_json(&output);
     assert_eq!(json["state"], "pending");
 
     // Adding a still-incomplete blocker must flip it to Blocked, not leave it Pending
@@ -2239,7 +2250,7 @@ fn test_edit_task_add_blocked_by_incomplete_blocker_sets_blocked() {
             "--json",
         ])
         .expect("Add blocked-by failed");
-    let json: Value = serde_json::from_str(&output).expect("Invalid JSON");
+    let json: Value = parse_json(&output);
     assert_eq!(
         json["state"], "blocked",
         "task must be Blocked right after adding an incomplete blocker"
@@ -2307,7 +2318,7 @@ fn test_edit_task_add_blocked_by_completed_blocker_stays_pending() {
             "--json",
         ])
         .expect("Add blocked-by failed");
-    let json: Value = serde_json::from_str(&output).expect("Invalid JSON");
+    let json: Value = parse_json(&output);
     assert_eq!(json["state"], "pending");
 }
 
@@ -2355,7 +2366,7 @@ fn test_edit_task_remove_blocked_by_unblocks_task() {
     let output = env
         .run(&["show", &dependent, "--json"])
         .expect("Show dependent failed");
-    let json: Value = serde_json::from_str(&output).expect("Invalid JSON");
+    let json: Value = parse_json(&output);
     assert_eq!(json["state"], "blocked");
 
     // Removing the only (still-incomplete) blocker must unblock it to Pending
@@ -2369,7 +2380,7 @@ fn test_edit_task_remove_blocked_by_unblocks_task() {
             "--json",
         ])
         .expect("Remove blocked-by failed");
-    let json: Value = serde_json::from_str(&output).expect("Invalid JSON");
+    let json: Value = parse_json(&output);
     assert_eq!(json["state"], "pending");
     assert!(
         json["blocked_by"].as_array().is_none_or(Vec::is_empty),
@@ -2522,7 +2533,7 @@ fn test_edit_task_deprecated_blocked_by_behaves_as_set() {
             "--json",
         ])
         .expect("Deprecated --blocked-by edit failed");
-    let json: Value = serde_json::from_str(&output).expect("Invalid JSON");
+    let json: Value = parse_json(&output);
     assert_eq!(json["state"], "blocked");
     let blocked_by: Vec<&str> = json["blocked_by"]
         .as_array()
@@ -2551,7 +2562,7 @@ fn test_goal_stays_pending_until_task_start() {
     let output = env
         .run(&["goal", "list", "--json"])
         .expect("Goal list --json failed");
-    let goals: Value = serde_json::from_str(&output).unwrap();
+    let goals: Value = parse_json(&output);
     assert_eq!(goals[0]["state"], "pending");
 
     // Create a task — goal must remain pending
@@ -2578,7 +2589,7 @@ fn test_goal_stays_pending_until_task_start() {
     let output = env
         .run(&["goal", "list", "--json"])
         .expect("Goal list --json failed");
-    let goals: Value = serde_json::from_str(&output).unwrap();
+    let goals: Value = parse_json(&output);
     assert_eq!(
         goals[0]["state"], "pending",
         "Goal must stay pending after task create, before task start"
@@ -2591,7 +2602,7 @@ fn test_goal_stays_pending_until_task_start() {
     let output = env
         .run(&["goal", "list", "--json"])
         .expect("Goal list --json failed");
-    let goals: Value = serde_json::from_str(&output).unwrap();
+    let goals: Value = parse_json(&output);
     assert_eq!(
         goals[0]["state"], "in_progress",
         "Goal must be in_progress after first task start"
@@ -2661,7 +2672,7 @@ fn test_delete_cascades_blocked_by_cleanup() {
     let output = env
         .run(&["task", "list", goal_id, "--json"])
         .expect("Task list failed");
-    let tasks: Value = serde_json::from_str(&output).unwrap();
+    let tasks: Value = parse_json(&output);
     let task_b_blocked = tasks
         .as_array()
         .unwrap()
@@ -2678,7 +2689,7 @@ fn test_delete_cascades_blocked_by_cleanup() {
     let output = env
         .run(&["task", "list", goal_id, "--json"])
         .expect("Task list after delete failed");
-    let tasks: Value = serde_json::from_str(&output).unwrap();
+    let tasks: Value = parse_json(&output);
     let task_b_unblocked = tasks
         .as_array()
         .unwrap()
@@ -2768,7 +2779,7 @@ fn test_create_task_blocked_by_completed_task_yields_pending() {
     let list_output = env
         .run(&["task", "list", goal_id, "--json"])
         .expect("List tasks failed");
-    let tasks: Value = serde_json::from_str(&list_output).expect("Invalid JSON");
+    let tasks: Value = parse_json(&list_output);
     let task_b_json = tasks
         .as_array()
         .unwrap()
@@ -2832,7 +2843,7 @@ fn test_blocked_by_comma_separated() {
     let show = env
         .run(&["show", &task_c, "--json"])
         .expect("Show task C failed");
-    let json: serde_json::Value = serde_json::from_str(&show).expect("Invalid JSON");
+    let json: serde_json::Value = parse_json(&show);
     let blocked_by: Vec<&str> = json["blocked_by"]
         .as_array()
         .unwrap()
@@ -2899,7 +2910,7 @@ fn test_blocked_by_space_separated_unquoted() {
     let show = env
         .run(&["show", &task_c, "--json"])
         .expect("Show task C failed");
-    let json: serde_json::Value = serde_json::from_str(&show).expect("Invalid JSON");
+    let json: serde_json::Value = parse_json(&show);
     let blocked_by: Vec<&str> = json["blocked_by"]
         .as_array()
         .unwrap()
@@ -2968,7 +2979,7 @@ fn test_blocked_by_mixed_comma_and_space() {
     let show = env
         .run(&["show", &task_d, "--json"])
         .expect("Show task D failed");
-    let json: serde_json::Value = serde_json::from_str(&show).expect("Invalid JSON");
+    let json: serde_json::Value = parse_json(&show);
     let blocked_by: Vec<&str> = json["blocked_by"]
         .as_array()
         .unwrap()
@@ -3561,19 +3572,19 @@ fn test_json_output_task_comment_and_comments() {
     let output = env
         .run(&["task", "create", &goal_id, "Comment me", "--json"])
         .expect("Create task failed");
-    let task: Value = serde_json::from_str(&output).expect("Should be valid JSON");
+    let task: Value = parse_json(&output);
     let task_id = task["id"].as_str().unwrap().to_string();
 
     let output = env
         .run(&["task", "comment", &task_id, "a note", "--json"])
         .expect("Comment --json failed");
-    let commented: Value = serde_json::from_str(&output).expect("Should be valid JSON");
+    let commented: Value = parse_json(&output);
     assert_eq!(commented["comments"][0]["text"], "a note");
 
     let output = env
         .run(&["task", "comments", &task_id, "--json"])
         .expect("Comments --json failed");
-    let comments: Value = serde_json::from_str(&output).expect("Should be valid JSON");
+    let comments: Value = parse_json(&output);
     assert_eq!(comments["comments"][0]["text"], "a note");
 }
 
@@ -3684,15 +3695,16 @@ fn test_show_and_status_goal_json_have_no_duplicate_metrics_key() {
         // serde_json's map silently drops one of two colliding keys, so a
         // bug here would still parse "successfully" with the wrong value.
         // Count raw occurrences of a *top-level* `metrics` key (pretty-printed
-        // with a 2-space indent) to catch the collision itself; the task's own
+        // with a 4-space indent, one level in from the `--json` envelope's
+        // `data` key) to catch the collision itself; the task's own
         // unrelated `metrics` field is nested deeper and indented further.
         assert_eq!(
-            output.matches("\n  \"metrics\": {").count(),
+            output.matches("\n    \"metrics\": {").count(),
             1,
             "expected exactly one top-level `metrics` key in {args:?} output:\n{output}"
         );
 
-        let parsed: Value = serde_json::from_str(&output).expect("Should be valid JSON");
+        let parsed: Value = parse_json(&output);
         assert_eq!(parsed["computed_metrics"]["task_count"], 1);
         assert_eq!(parsed["metrics"]["task_count"], 1);
     }
@@ -3768,7 +3780,7 @@ fn test_subtask_inherits_unresolved_parent_blocker() {
     let show = env
         .run(&["show", &subtask, "--json"])
         .expect("Show subtask failed");
-    let json: Value = serde_json::from_str(&show).expect("Invalid JSON");
+    let json: Value = parse_json(&show);
     assert_eq!(json["state"], "pending");
 
     // But it still can't start: it inherits the parent's unresolved blocker.
@@ -3852,7 +3864,7 @@ fn test_ready_excludes_subtask_blocked_by_parent() {
     let output = env
         .run(&["ready", &goal_id, "--json"])
         .expect("Ready failed");
-    let json: Value = serde_json::from_str(&output).expect("Invalid JSON");
+    let json: Value = parse_json(&output);
     let ids: Vec<&str> = json
         .as_array()
         .unwrap()
@@ -3872,7 +3884,7 @@ fn test_ready_excludes_subtask_blocked_by_parent() {
     let output = env
         .run(&["ready", &goal_id, "--json"])
         .expect("Ready failed");
-    let json: Value = serde_json::from_str(&output).expect("Invalid JSON");
+    let json: Value = parse_json(&output);
     let ids: Vec<&str> = json
         .as_array()
         .unwrap()
@@ -3941,7 +3953,7 @@ fn test_complete_parent_requires_force_and_records_override_comment() {
     let show = env
         .run(&["show", &parent, "--json"])
         .expect("Show parent failed");
-    let json: Value = serde_json::from_str(&show).expect("Invalid JSON");
+    let json: Value = parse_json(&show);
     assert_eq!(json["state"], "completed");
 
     let comments = env
@@ -3986,7 +3998,7 @@ fn test_cancel_parent_with_subtasks_requires_force() {
     let show = env
         .run(&["show", &parent, "--json"])
         .expect("Show parent failed");
-    let json: Value = serde_json::from_str(&show).expect("Invalid JSON");
+    let json: Value = parse_json(&show);
     assert_eq!(json["state"], "cancelled");
 }
 
@@ -4052,7 +4064,7 @@ fn test_goal_cancel_forces_past_parent_with_subtasks() {
     let show = env
         .run(&["show", &parent, "--json"])
         .expect("Show parent failed");
-    let json: Value = serde_json::from_str(&show).expect("Invalid JSON");
+    let json: Value = parse_json(&show);
     assert_eq!(json["state"], "cancelled");
 }
 
@@ -4086,7 +4098,7 @@ fn test_task_create_with_tags_and_edit_upserts() {
     let show = env
         .run(&["show", &task_id, "--json"])
         .expect("Show task failed");
-    let json: Value = serde_json::from_str(&show).expect("Invalid JSON");
+    let json: Value = parse_json(&show);
     assert_eq!(json["tags"]["env"], "staging");
     assert_eq!(json["tags"]["owner"], "alice");
 
@@ -4105,7 +4117,7 @@ fn test_task_create_with_tags_and_edit_upserts() {
     let show = env
         .run(&["show", &task_id, "--json"])
         .expect("Show task failed");
-    let json: Value = serde_json::from_str(&show).expect("Invalid JSON");
+    let json: Value = parse_json(&show);
     assert_eq!(json["tags"]["env"], "prod");
     assert_eq!(json["tags"]["owner"], "alice");
 }
@@ -4135,7 +4147,7 @@ fn test_goal_create_with_tags_and_edit_upserts() {
     let show = env
         .run(&["show", &goal_id, "--json"])
         .expect("Show goal failed");
-    let json: Value = serde_json::from_str(&show).expect("Invalid JSON");
+    let json: Value = parse_json(&show);
     assert_eq!(json["tags"]["team"], "core");
 }
 
@@ -4315,7 +4327,7 @@ fn test_task_verify_runs_verify_cmd_and_reports_pass() {
     let output = env
         .run(&["task", "verify", &task_id, "--json"])
         .expect("Verify failed");
-    let parsed: Value = serde_json::from_str(&output).expect("Should be valid JSON");
+    let parsed: Value = parse_json(&output);
     assert_eq!(parsed["passed"], true);
     assert_eq!(parsed["exit_code"], 0);
 
@@ -4323,7 +4335,7 @@ fn test_task_verify_runs_verify_cmd_and_reports_pass() {
     let output = env
         .run(&["status", "--task", &task_id, "--json"])
         .expect("Status failed");
-    let parsed: Value = serde_json::from_str(&output).expect("Should be valid JSON");
+    let parsed: Value = parse_json(&output);
     assert_eq!(parsed["state"], "in_progress");
 }
 
@@ -4336,7 +4348,7 @@ fn test_task_verify_reports_failure_without_touching_state() {
     let output = env
         .run(&["task", "verify", &task_id, "--json"])
         .expect("Verify failed");
-    let parsed: Value = serde_json::from_str(&output).expect("Should be valid JSON");
+    let parsed: Value = parse_json(&output);
     assert_eq!(parsed["passed"], false);
     assert_eq!(parsed["exit_code"], 3);
 }
@@ -4376,7 +4388,7 @@ fn test_task_complete_refuses_on_failing_verify_cmd() {
     let output = env
         .run(&["status", "--task", &task_id, "--json"])
         .expect("Status failed");
-    let parsed: Value = serde_json::from_str(&output).expect("Should be valid JSON");
+    let parsed: Value = parse_json(&output);
     assert_eq!(parsed["state"], "in_progress");
 
     let output = env
@@ -4394,7 +4406,7 @@ fn test_task_complete_succeeds_on_passing_verify_cmd() {
     let output = env
         .run(&["task", "complete", &task_id, "--result", "Done", "--json"])
         .expect("Complete should succeed when verify_cmd passes");
-    let parsed: Value = serde_json::from_str(&output).expect("Should be valid JSON");
+    let parsed: Value = parse_json(&output);
     assert_eq!(parsed["task"]["state"], "completed");
 }
 
@@ -4415,7 +4427,7 @@ fn test_task_complete_skip_verify_bypasses_failing_verify_cmd() {
             "--json",
         ])
         .expect("Complete with --skip-verify should succeed despite failing verify_cmd");
-    let parsed: Value = serde_json::from_str(&output).expect("Should be valid JSON");
+    let parsed: Value = parse_json(&output);
     assert_eq!(parsed["task"]["state"], "completed");
 
     let output = env
@@ -4462,7 +4474,7 @@ fn test_task_complete_skip_verify_is_a_noop_without_a_verify_cmd() {
             "--json",
         ])
         .expect("Complete with --skip-verify and no verify_cmd should succeed");
-    let parsed: Value = serde_json::from_str(&output).expect("Should be valid JSON");
+    let parsed: Value = parse_json(&output);
     assert_eq!(parsed["task"]["state"], "completed");
 
     let output = env
@@ -4522,7 +4534,7 @@ fn test_task_complete_releases_db_lock_while_verify_cmd_runs() {
     let output = env
         .run(&["status", "--task", &task_id, "--json"])
         .expect("Status failed");
-    let parsed: Value = serde_json::from_str(&output).expect("Should be valid JSON");
+    let parsed: Value = parse_json(&output);
     assert_eq!(parsed["state"], "completed");
 }
 
