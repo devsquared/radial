@@ -274,3 +274,10 @@ If you get stuck on a task, add a comment explaining why and release it:
 rd task comment <task_id> "Blocked on missing API credentials"
 rd task release <task_id>
 ```
+
+### Beyond the CLI
+
+This guide covers `rd`'s CLI commands only. `rd` can also run as an MCP (Model Context
+Protocol) server (`rd mcp`) exposing the same operations as tools, and has a `rd doctor`
+health check and a `rd migrate` command for normalizing the stored format. See the project
+README for all three.
