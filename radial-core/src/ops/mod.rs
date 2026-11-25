@@ -14,6 +14,8 @@ pub mod goal;
 pub mod init;
 /// List every goal (and, in full mode, its tasks) across the database.
 pub mod list;
+/// Rewrite every goal/task file once to normalize spelling and defaults.
+pub mod migrate;
 /// Render the prep prompt handed to a new agent picking up work.
 pub mod prep;
 /// List tasks that are unblocked and ready to start.

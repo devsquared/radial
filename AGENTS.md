@@ -133,6 +133,7 @@ radial/
 │   │       ├── goal.rs     # rd goal create/list/cancel
 │   │       ├── init.rs     # rd init
 │   │       ├── list.rs     # rd list
+│   │       ├── migrate.rs  # rd migrate: normalize files to canonical form
 │   │       ├── prep.rs     # rd prep (+ prep.md, the embedded prompt text)
 │   │       ├── ready.rs    # rd ready
 │   │       ├── restore.rs  # rd restore

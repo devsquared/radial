@@ -1440,6 +1440,33 @@ pub fn doctor(report: &radial_core::ops::doctor::DoctorReport, opts: &RenderOpti
     })
 }
 
+pub fn migrate(
+    report: &radial_core::ops::migrate::MigrateReport,
+    opts: &RenderOptions,
+) -> Result<()> {
+    json_or(report, opts, |w| {
+        writeln!(
+            w,
+            "Checked {} goal(s), {} task(s)",
+            report.goals_checked, report.tasks_checked
+        )?;
+        if report.changed() {
+            writeln!(
+                w,
+                "{} {} file(s):",
+                style("Rewrote").green(),
+                report.rewritten_files.len()
+            )?;
+            for path in &report.rewritten_files {
+                writeln!(w, "  {path}")?;
+            }
+        } else {
+            writeln!(w, "{}", style("Nothing to migrate.").green())?;
+        }
+        Ok(())
+    })
+}
+
 // -- Helpers --
 
 /// Write a labeled field: `{label}  {value}` with consistent alignment.

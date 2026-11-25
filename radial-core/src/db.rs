@@ -218,12 +218,12 @@ impl Database {
     }
 
     /// Path to a goal's TOML file: `<base>/<goal_id>/goal.toml`.
-    fn goal_path(&self, goal: &Goal) -> PathBuf {
+    pub fn goal_path(&self, goal: &Goal) -> PathBuf {
         self.path.join(goal.id().as_ref()).join("goal.toml")
     }
 
     /// Path to a task's TOML file: `<base>/<goal_id>/<task_id>.toml`.
-    fn task_path(&self, task: &Task) -> PathBuf {
+    pub fn task_path(&self, task: &Task) -> PathBuf {
         self.path
             .join(task.goal_id().as_ref())
             .join(format!("{}.toml", task.id()))
