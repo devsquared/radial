@@ -85,8 +85,7 @@ pub fn apply(task_id: &str, summary: String, db: &mut Database) -> Result<String
         .into());
     }
 
-    let task = task.clone();
-    db.save_task(&task)?;
+    db.persist_task(&tid)?;
     Ok(task_id.to_string())
 }
 

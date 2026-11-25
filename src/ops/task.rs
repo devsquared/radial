@@ -247,7 +247,7 @@ pub fn create(
     );
     task.merge_tags(tags);
 
-    db.create_task(task.clone())?;
+    let task = db.create_task(task)?;
 
     // Sync parent state now that it has a new subtask
     if let Some(ref pid) = parent_id {
@@ -300,9 +300,7 @@ pub fn set_tags(
 
     let task = db.get_task_mut(task_id).unwrap();
     task.merge_tags(tags);
-    let task = task.clone();
-    db.save_task(&task)?;
-    Ok(task)
+    db.persist_task(task_id)
 }
 
 /// Whether a task's tags satisfy every key-value pair in `filter` (an empty
@@ -402,8 +400,7 @@ pub fn start(task_id: &TaskId, assignee: &str, force: bool, db: &mut Database) -
         .into());
     }
     task.set_assignee(Some(assignee.to_owned()));
-    let task = task.clone();
-    db.save_task(&task)?;
+    db.persist_task(task_id)?;
 
     if let Some(ref pid) = parent_id {
         db.sync_parent_state(pid)?;
@@ -413,8 +410,7 @@ pub fn start(task_id: &TaskId, assignee: &str, force: bool, db: &mut Database) -
     let goal = db.get_goal_mut(&goal_id).unwrap();
     if goal.state() == GoalState::Pending {
         goal.mark_in_progress();
-        let goal = goal.clone();
-        db.save_goal(&goal)?;
+        db.persist_goal(&goal_id)?;
     }
 
     Ok(db.get_task(task_id).unwrap().clone())
@@ -457,9 +453,7 @@ pub fn release_stale(threshold: SignedDuration, db: &mut Database) -> Result<Vec
             parent_ids.insert(pid);
         }
         task.release();
-        let task = task.clone();
-        db.save_task(&task)?;
-        released.push(task);
+        released.push(db.persist_task(id)?);
     }
 
     for pid in &parent_ids {
@@ -483,9 +477,7 @@ pub fn release_all_in_progress(db: &mut Database) -> Result<Vec<Task>> {
             parent_ids.insert(pid);
         }
         task.release();
-        let task = task.clone();
-        db.save_task(&task)?;
-        released.push(task);
+        released.push(db.persist_task(id)?);
     }
 
     for pid in &parent_ids {
@@ -579,8 +571,8 @@ pub fn record_verify_failure(
         CoreError::task_not_found(task_id.to_string(), format!("Task not found: {task_id}"))
     })?;
     task.add_comment(Comment::new(generate_id(), text, Timestamp::now()));
-    let task = task.clone();
-    db.save_task(&task)
+    db.persist_task(task_id)?;
+    Ok(())
 }
 
 /// Records that a `verify_cmd` was bypassed via `--skip-verify`. Not saved
@@ -743,8 +735,7 @@ fn finish_completion(
         )
         .into());
     }
-    let completed_task = task.clone();
-    db.save_task(&completed_task)?;
+    let completed_task = db.persist_task(task_id)?;
     let goal_id = completed_task.goal_id().clone();
     let parent_id = completed_task.parent_id().cloned();
 
@@ -769,8 +760,7 @@ fn finish_completion(
             if all_blockers_done {
                 let dep_task = db.get_task_mut(dep_id).unwrap();
                 dep_task.unblock();
-                let dep_task = dep_task.clone();
-                db.save_task(&dep_task)?;
+                db.persist_task(dep_id)?;
                 unblocked_task_ids.push(dep_id.clone());
             }
         }
@@ -798,8 +788,7 @@ fn finish_completion(
                 if all_blockers_done {
                     let dep_task = db.get_task_mut(dep_id).unwrap();
                     dep_task.unblock();
-                    let dep_task = dep_task.clone();
-                    db.save_task(&dep_task)?;
+                    db.persist_task(dep_id)?;
                     unblocked_task_ids.push(dep_id.clone());
                 }
             }
@@ -908,8 +897,7 @@ pub fn fail(
         record_force_override(task_id, "fail", db)?;
     }
 
-    let failed_task = db.get_task(task_id).unwrap().clone();
-    db.save_task(&failed_task)?;
+    let failed_task = db.persist_task(task_id)?;
 
     if let Some(pid) = failed_task.parent_id() {
         db.sync_parent_state(pid)?;
@@ -962,8 +950,7 @@ pub fn retry(task_id: &TaskId, force: bool, db: &mut Database) -> Result<Task> {
     if force_override {
         record_force_override(task_id, "retry", db)?;
     }
-    let retried_task = db.get_task(task_id).unwrap().clone();
-    db.save_task(&retried_task)?;
+    let retried_task = db.persist_task(task_id)?;
 
     if let Some(pid) = retried_task.parent_id() {
         db.sync_parent_state(pid)?;
@@ -1016,8 +1003,7 @@ pub fn submit(task_id: &TaskId, force: bool, db: &mut Database) -> Result<Task> 
     if force_override {
         record_force_override(task_id, "submit", db)?;
     }
-    let submitted_task = db.get_task(task_id).unwrap().clone();
-    db.save_task(&submitted_task)?;
+    let submitted_task = db.persist_task(task_id)?;
 
     if let Some(pid) = submitted_task.parent_id() {
         db.sync_parent_state(pid)?;
@@ -1070,8 +1056,7 @@ pub fn reject(task_id: &TaskId, reason: String, force: bool, db: &mut Database) 
     if force_override {
         record_force_override(task_id, "reject", db)?;
     }
-    let rejected_task = db.get_task(task_id).unwrap().clone();
-    db.save_task(&rejected_task)?;
+    let rejected_task = db.persist_task(task_id)?;
 
     if let Some(pid) = rejected_task.parent_id() {
         db.sync_parent_state(pid)?;
@@ -1107,8 +1092,7 @@ pub fn release(task_id: &TaskId, force: bool, db: &mut Database) -> Result<Task>
     if force_override {
         record_force_override(task_id, "release", db)?;
     }
-    let released_task = db.get_task(task_id).unwrap().clone();
-    db.save_task(&released_task)?;
+    let released_task = db.persist_task(task_id)?;
 
     if let Some(pid) = released_task.parent_id() {
         db.sync_parent_state(pid)?;
@@ -1159,8 +1143,7 @@ fn cascade_cancel_downstream(
             let cascade_reason = format!("cascaded from cancellation of {root_task_id}");
             let cascade_comment = Comment::new(generate_id(), cascade_reason, Timestamp::now());
             task_mut.add_comment(cascade_comment);
-            let cancelled = task_mut.clone();
-            db.save_task(&cancelled)?;
+            let cancelled = db.persist_task(&current_id)?;
             cascaded_task_ids.push(current_id.clone());
 
             // Sync parent if this task has one
@@ -1255,8 +1238,7 @@ pub fn cancel(
     if let Some(text) = override_text {
         task.add_comment(Comment::new(generate_id(), text, Timestamp::now()));
     }
-    let cancelled_task = task.clone();
-    db.save_task(&cancelled_task)?;
+    let cancelled_task = db.persist_task(task_id)?;
 
     // Remove the cancelled task ID from any downstream blocked_by lists and unblock
     // tasks whose blocker list becomes empty (Option A: auto-unblock)
@@ -1294,8 +1276,7 @@ pub fn cancel(
             dep.unblock();
             unblocked_task_ids.push(dep_id.clone());
         }
-        let dep = dep.clone();
-        db.save_task(&dep)?;
+        db.persist_task(dep_id)?;
     }
 
     // Sync parent state
@@ -1372,8 +1353,7 @@ pub fn delete(task_id: &TaskId, db: &mut Database) -> Result<Task> {
         if should_unblock {
             dep.unblock();
         }
-        let dep = dep.clone();
-        db.save_task(&dep)?;
+        db.persist_task(dep_id)?;
     }
 
     if let Some(pid) = parent_id {
@@ -1401,8 +1381,5 @@ pub fn comment(task_id: &TaskId, text: String, db: &mut Database) -> Result<Task
 
     let task = db.get_task_mut(task_id).unwrap();
     task.add_comment(comment);
-    let task = task.clone();
-    db.save_task(&task)?;
-
-    Ok(task)
+    db.persist_task(task_id)
 }

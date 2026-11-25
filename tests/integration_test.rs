@@ -900,6 +900,55 @@ fn test_json_output_task_start_and_complete() {
     assert!(completed["unblocked_task_ids"].is_array());
 }
 
+// A file watcher needs a cheap way to tell a record changed without
+// diffing it; `version` on Goal/Task serves that. It should start at 1 as
+// soon as a record is first persisted and increase by exactly one on every
+// subsequent write, visible through `--json` the same as through the
+// on-disk TOML a watcher would read directly.
+#[test]
+fn test_version_counter_increments_on_every_write() {
+    let env = TestEnv::new();
+    env.run(&["init"]).expect("Init failed");
+
+    let output = env
+        .run(&["goal", "create", "Version counter test", "--json"])
+        .expect("Create goal failed");
+    let goal: Value = serde_json::from_str(&output).expect("Should be valid JSON");
+    let goal_id = goal["id"].as_str().unwrap().to_string();
+    assert_eq!(goal["version"], 1);
+
+    let output = env
+        .run(&[
+            "task",
+            "create",
+            &goal_id,
+            "Version counter task",
+            "--receives",
+            "in",
+            "--produces",
+            "out",
+            "--verify",
+            "ok",
+            "--json",
+        ])
+        .expect("Create task failed");
+    let created: Value = serde_json::from_str(&output).expect("Should be valid JSON");
+    let task_id = created["id"].as_str().unwrap().to_string();
+    assert_eq!(created["version"], 1);
+
+    let output = env
+        .run(&["task", "start", &task_id, "--assignee", "tester", "--json"])
+        .expect("Start task --json failed");
+    let started: Value = serde_json::from_str(&output).expect("Should be valid JSON");
+    assert_eq!(started["version"], 2);
+
+    let output = env
+        .run(&["task", "complete", &task_id, "--result", "Done", "--json"])
+        .expect("Complete task --json failed");
+    let completed: Value = serde_json::from_str(&output).expect("Should be valid JSON");
+    assert_eq!(completed["task"]["version"], 3);
+}
+
 #[test]
 fn test_json_output_init() {
     let env = TestEnv::new();
