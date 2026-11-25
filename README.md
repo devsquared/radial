@@ -30,6 +30,7 @@ Task orchestration for LLM agents. Break down goals into tracked, contract-bound
 - **Shell completions** — `rd completions <shell>` covers bash, zsh, fish, elvish, and PowerShell
 - **Task-driven memory** — goals and tasks persist across sessions, giving agents durable context for long-running workflows
 - **Agent onboarding** — `rd prep` outputs a usage guide you can drop straight into a prompt
+- **MCP server** — `rd mcp` exposes the same operations as MCP tools over stdio, plus `get_my_work` for finding the next unblocked task in one call; `--allow-tool` scopes a session to a subset
 
 ## Overview
 
@@ -100,7 +101,7 @@ Stop when nothing is ready. If a task start fails because another agent claimed 
 
 Every command below also accepts `--help` for its full flag reference; `rd prep` prints a longer
 walkthrough aimed at agents. Almost every command also accepts `--json` for machine-readable output
-(the only exception is `rd completions`, whose output already is the intended format).
+(the exceptions are `rd completions` and `rd mcp`, whose output already is the intended format).
 
 #### Setup
 
@@ -179,6 +180,7 @@ walkthrough aimed at agents. Almost every command also accepts `--json` for mach
 | Command | Description |
 |---------|-------------|
 | `rd prep` | Print a full usage guide for LLM agents, suitable for pasting straight into a prompt |
+| `rd mcp [--allow-tool <name>]` | Run radial as an MCP server over stdio. `--allow-tool` (repeatable) restricts the exposed tool set; omit it to expose every tool. See [MCP server](#mcp-server) below |
 
 ### Contracts
 
@@ -245,6 +247,27 @@ Cancelling and archiving are distinct: `rd goal cancel`/`rd task cancel` change 
 the database layout, while `rd clean` is what actually moves a goal's files into `.radial/archive/` (or
 deletes them, with `--purge`). Archived goals are excluded from `rd goal list` and `rd list`; pass
 `--archived` to `rd list` to see them, and `rd restore <goal-id>` to bring one back.
+
+### MCP server
+
+```bash
+rd mcp
+```
+
+Runs radial as an MCP (Model Context Protocol) stdio server: a thin wrapper exposing the same
+operations as the CLI (`goal_create`, `task_start`, `task_complete`, `ready`, `status`, `show`,
+...) as tools, plus `get_my_work`, which returns the next unblocked task together with its full
+contract, parent goal, and dependency context in one call. Requires an already-initialized
+`.radial/` directory (run `rd init` first) in the directory the server is launched from.
+
+`--allow-tool <name>` (repeatable) restricts which tools a given MCP session can call -- useful
+for a host that wants to scope a worker session to a subset (e.g. just the lifecycle tools) while
+an orchestrator session keeps the full set. Omit it to expose every tool. Radial has no notion of
+roles itself; this is a generic allow-list keyed by tool name, for the host to configure.
+
+Each tool call opens its own `Database` handle under the server process's working directory and
+drops it before returning -- no state is held across calls, the same "stateless reload-per-call
+under the existing lock" model the CLI uses.
 
 ### Shell completions
 

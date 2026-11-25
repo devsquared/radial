@@ -157,6 +157,20 @@ pub enum Commands {
         /// The shell to generate completions for
         shell: Shell,
     },
+
+    /// Run radial as an MCP (Model Context Protocol) server over stdio
+    ///
+    /// Requires an already-initialized `.radial/` directory in the current
+    /// working directory (run `rd init` first).
+    Mcp {
+        /// Restrict the exposed tool set to just these tool names
+        /// (repeatable). Omit to expose every tool. A generic allow-list
+        /// mechanism for the host (e.g. an orchestrator) to scope what a
+        /// given MCP session may call -- radial has no notion of roles
+        /// itself, just tool names.
+        #[arg(long = "allow-tool")]
+        allow_tool: Vec<String>,
+    },
 }
 
 #[derive(Subcommand)]

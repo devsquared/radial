@@ -7,6 +7,7 @@
 #![allow(clippy::must_use_candidate)]
 
 pub(crate) mod cli;
+pub(crate) mod mcp;
 pub(crate) mod output;
 
 pub use radial_core::ops::task::CompleteResult;
@@ -25,7 +26,7 @@ use std::path::PathBuf;
 /// The name completion scripts and usage text refer to the binary as.
 const BIN_NAME: &str = "rd";
 
-fn get_radial_path() -> Option<PathBuf> {
+pub(crate) fn get_radial_path() -> Option<PathBuf> {
     let current_dir = std::env::current_dir().ok()?;
     radial_core::resolve_radial_dir(&current_dir)
 }
@@ -58,14 +59,14 @@ fn parse_tags(raw: Vec<String>) -> Result<std::collections::BTreeMap<String, Str
         .collect()
 }
 
-fn ensure_initialized_for_write() -> Result<(Database, DbLock)> {
+pub(crate) fn ensure_initialized_for_write() -> Result<(Database, DbLock)> {
     let radial_dir = get_radial_path()
         .ok_or_else(|| anyhow!("Radial not initialized. Run 'radial init' first."))?;
 
     Database::open_for_write(&radial_dir).context("Failed to open database for write")
 }
 
-fn ensure_initialized_for_read() -> Result<(Database, DbLock)> {
+pub(crate) fn ensure_initialized_for_read() -> Result<(Database, DbLock)> {
     let radial_dir = get_radial_path()
         .ok_or_else(|| anyhow!("Radial not initialized. Run 'radial init' first."))?;
 
@@ -74,7 +75,7 @@ fn ensure_initialized_for_read() -> Result<(Database, DbLock)> {
 
 /// Resolve a goal ID argument that may have been omitted, falling back to
 /// the single active (pending or in-progress) goal when there is exactly one.
-fn resolve_goal_or_default(goal_id: Option<&str>, db: &Database) -> Result<GoalId> {
+pub(crate) fn resolve_goal_or_default(goal_id: Option<&str>, db: &Database) -> Result<GoalId> {
     if let Some(id) = goal_id {
         return db.resolve_any_goal(id).map_err(|e| anyhow!("{e}"));
     }
@@ -318,10 +319,14 @@ fn run_task(task_cmd: TaskCommands, db: &mut Database) -> Result<()> {
     }
 }
 
-/// `rd task verify <id>`: an advisory, read-only dry run of a task's
-/// `verify_cmd`. Releases the database lock before running it — nothing is
-/// recorded, so there's nothing to re-check afterward.
-fn run_task_verify(task_id_str: &str, json: bool) -> Result<()> {
+/// An advisory, read-only dry run of a task's `verify_cmd`. Releases the
+/// database lock before running it — nothing is recorded, so there's
+/// nothing to re-check afterward.
+///
+/// Shared between `rd task verify` and the MCP `task_verify` tool.
+pub(crate) fn verify_task_dry_run(
+    task_id_str: &str,
+) -> Result<(TaskId, ops::verify::VerifyResult)> {
     let radial_dir = get_radial_path()
         .ok_or_else(|| anyhow!("Radial not initialized. Run 'radial init' first."))?;
 
@@ -346,22 +351,29 @@ fn run_task_verify(task_id_str: &str, json: bool) -> Result<()> {
     };
 
     let result = ops::verify::run_cmd(&cmd, ops::verify::DEFAULT_TIMEOUT)?;
+    Ok((task_id, result))
+}
+
+/// `rd task verify <id>`: prints the dry run's result.
+fn run_task_verify(task_id_str: &str, json: bool) -> Result<()> {
+    let (task_id, result) = verify_task_dry_run(task_id_str)?;
     output::task_verified(&task_id, &result, &RenderOptions::new().json(json))
 }
 
-/// `rd task complete`: runs the contract's `verify_cmd` (unless it has none,
-/// or `--skip-verify` was passed) and refuses to complete on a nonzero exit
-/// or timeout.
+/// Runs the contract's `verify_cmd` (unless it has none, or `skip_verify`
+/// was passed) and refuses to complete on a nonzero exit or timeout.
 ///
 /// Sequences the database lock around the external process per
 /// `ROADMAP.md`'s executable-verification item: load state, release the
 /// lock, run the check, re-acquire the lock, then let `ops::task::complete`
 /// re-validate the task's state before recording anything.
+///
+/// Shared between `rd task complete` and the MCP `task_complete` tool.
 // `guard`'s final assignment is only ever "read" by its Drop running at
 // scope end, which these lints don't count as a use — the reassignment
 // itself is the point: it keeps the reacquired lock held until then.
 #[allow(clippy::too_many_arguments, unused_assignments)]
-fn run_task_complete(
+pub(crate) fn complete_task_with_verify(
     task_id_str: &str,
     result: String,
     artifacts: Option<Vec<String>>,
@@ -369,8 +381,7 @@ fn run_task_complete(
     elapsed: Option<i64>,
     force: bool,
     skip_verify: bool,
-    json: bool,
-) -> Result<()> {
+) -> Result<CompleteResult> {
     let radial_dir = get_radial_path()
         .ok_or_else(|| anyhow!("Radial not initialized. Run 'radial init' first."))?;
 
@@ -425,8 +436,30 @@ fn run_task_complete(
         }
     }
 
-    let complete_result =
-        ops::task::complete(&task_id, result, artifacts, tokens, elapsed, force, &mut db)?;
+    ops::task::complete(&task_id, result, artifacts, tokens, elapsed, force, &mut db)
+}
+
+/// `rd task complete <id>`: prints the completion result.
+#[allow(clippy::too_many_arguments)]
+fn run_task_complete(
+    task_id_str: &str,
+    result: String,
+    artifacts: Option<Vec<String>>,
+    tokens: Option<i64>,
+    elapsed: Option<i64>,
+    force: bool,
+    skip_verify: bool,
+    json: bool,
+) -> Result<()> {
+    let complete_result = complete_task_with_verify(
+        task_id_str,
+        result,
+        artifacts,
+        tokens,
+        elapsed,
+        force,
+        skip_verify,
+    )?;
     output::task_completed(&complete_result, &RenderOptions::new().json(json))
 }
 
@@ -634,6 +667,12 @@ fn run(cli: Cli) -> Result<()> {
         Commands::Completions { shell } => {
             clap_complete::generate(shell, &mut Cli::command(), BIN_NAME, &mut std::io::stdout());
             Ok(())
+        }
+        Commands::Mcp { allow_tool } => {
+            let allowed_tools = (!allow_tool.is_empty()).then(|| allow_tool.into_iter().collect());
+            tokio::runtime::Runtime::new()
+                .context("Failed to start async runtime for MCP server")?
+                .block_on(mcp::run(allowed_tools))
         }
     }
 }
