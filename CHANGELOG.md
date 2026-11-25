@@ -3,6 +3,18 @@
 All notable changes to this project are documented in this file.
 Generated from [conventional commits](https://www.conventionalcommits.org/) with [git-cliff](https://git-cliff.org/).
 
+## [1.0.0] - 2026-11-25
+
+### Bug Fixes
+
+- Drop broken intra-doc links to a private constant in VerifyResult
+
+### Features
+
+- Split radial-core out into its own workspace crate
+- Add rd mcp -- an MCP server over stdio, mirroring the CLI 1:1
+- Add rd doctor -- a point-in-time health check
+- Add rd migrate -- confirm-and-normalize every persisted file
 ## [0.2.0] - 2026-11-25
 
 ### Bug Fixes

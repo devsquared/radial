@@ -7,7 +7,7 @@ default-members = [".", "radial-core"]
 
 [package]
 name = "radial"
-version = "0.2.0"
+version = "1.0.0"
 edition = "2024"
 authors = ["Devin Ward <devissquared@gmail.com>"]
 description = "Task orchestration for LLM agents with contract-based coordination"
