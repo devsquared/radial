@@ -4571,3 +4571,85 @@ fn test_edit_task_verify_cmd_set_change_and_clear_record_comments() {
     assert!(result.is_err());
     assert!(result.unwrap_err().contains("no verify_cmd set"));
 }
+
+#[test]
+fn test_doctor_reports_uninitialized_directory_and_exits_nonzero() {
+    let env = TestEnv::new();
+    // Deliberately no `rd init`.
+
+    let output = Command::new(&env.binary_path)
+        .args(["doctor"])
+        .current_dir(&env.work_dir)
+        .output()
+        .expect("failed to run rd doctor");
+
+    assert!(!output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("does not exist"));
+    assert!(stdout.contains("rd init"));
+}
+
+#[test]
+fn test_doctor_reports_healthy_on_a_fresh_init_and_exits_zero() {
+    let env = TestEnv::new();
+    env.run(&["init"]).expect("Init failed");
+
+    let output = env
+        .run(&["doctor"])
+        .expect("rd doctor should succeed on a healthy directory");
+    assert!(output.contains("Everything looks healthy"));
+
+    let json_output = env
+        .run(&["doctor", "--json"])
+        .expect("rd doctor --json failed");
+    let parsed = parse_json(&json_output);
+    assert_eq!(parsed["exists"], true);
+    assert_eq!(parsed["lock_ok"], true);
+    assert_eq!(parsed["parse_errors"], serde_json::json!([]));
+    assert_eq!(parsed["orphaned_refs"], serde_json::json!([]));
+}
+
+#[test]
+fn test_doctor_catches_a_dangling_blocked_by_reference_and_exits_nonzero() {
+    let env = TestEnv::new();
+    env.run(&["init"]).expect("Init failed");
+
+    let goal_output = env
+        .run(&["goal", "create", "Doctor corruption test"])
+        .expect("Create goal failed");
+    let goal_id = extract_created_id(&goal_output, "Created goal:");
+
+    let task_output = env
+        .run(&["task", "create", &goal_id, "Task A", "--json"])
+        .expect("Create task failed");
+    let task: Value = parse_json(&task_output);
+    let task_id = task["id"].as_str().unwrap().to_string();
+
+    // Corrupt the persisted task file: append a blocked_by entry pointing at
+    // a task that doesn't exist anywhere in the database.
+    let task_path = env
+        .work_dir
+        .join(".radial")
+        .join(&goal_id)
+        .join(format!("{task_id}.toml"));
+    let content = std::fs::read_to_string(&task_path).expect("failed to read task file");
+    // Insert before `[metrics]` -- appending at the end would land inside
+    // that table instead of as a top-level task field.
+    let content = content.replacen(
+        "[metrics]",
+        "blocked_by = [\"doesnotexist\"]\n\n[metrics]",
+        1,
+    );
+    std::fs::write(&task_path, content).expect("failed to write corrupted task file");
+
+    let output = Command::new(&env.binary_path)
+        .args(["doctor"])
+        .current_dir(&env.work_dir)
+        .output()
+        .expect("failed to run rd doctor");
+
+    assert!(!output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("orphaned references"));
+    assert!(stdout.contains("doesnotexist"));
+}

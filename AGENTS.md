@@ -128,6 +128,7 @@ radial/
 │   │       ├── mod.rs
 │   │       ├── clean.rs    # rd clean / rd restore's counterpart
 │   │       ├── compact.rs  # rd compact analyze/apply
+│   │       ├── doctor.rs   # rd doctor health check
 │   │       ├── edit.rs     # rd edit goal/task
 │   │       ├── goal.rs     # rd goal create/list/cancel
 │   │       ├── init.rs     # rd init
@@ -149,7 +150,8 @@ radial/
 │   ├── mcp.rs             # rd mcp: ops exposed as MCP tools over stdio
 │   └── output.rs          # Terminal and JSON rendering
 ├── tests/
-│   └── integration_test.rs # Drives the compiled `rd` binary end to end
+│   ├── integration_test.rs # Drives the compiled `rd` binary end to end
+│   └── mcp_test.rs         # Drives `rd mcp` over stdio as a real subprocess
 ├── Cargo.toml              # Workspace manifest + the `radial` (rd) package
 └── AGENTS.md
 ```

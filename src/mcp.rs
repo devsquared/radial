@@ -909,6 +909,17 @@ impl RadialMcp {
             "dependencies": dependencies,
         }))
     }
+
+    #[tool(
+        description = "Point-in-time health check of the .radial directory: existence, lock status, parse errors, and orphaned goal/task references. Does not require .radial to already be initialized"
+    )]
+    fn doctor(&self) -> Result<CallToolResult, McpError> {
+        let current_dir =
+            std::env::current_dir().map_err(|e| McpError::internal_error(e.to_string(), None))?;
+        let radial_dir = radial_core::resolve_radial_dir(&current_dir)
+            .unwrap_or_else(|| current_dir.join(radial_core::RADIAL_DIR));
+        ok_json(&ops::doctor::run(&radial_dir))
+    }
 }
 
 // The macro generates async call_tool/list_tools/get_tool methods per the

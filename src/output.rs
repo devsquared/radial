@@ -1366,6 +1366,80 @@ pub fn compact_apply(task_id: &str, opts: &RenderOptions) -> Result<()> {
     })
 }
 
+pub fn doctor(report: &radial_core::ops::doctor::DoctorReport, opts: &RenderOptions) -> Result<()> {
+    json_or(report, opts, |w| {
+        writeln!(w, "Checked: {}", report.radial_dir.display())?;
+
+        if !report.exists {
+            writeln!(
+                w,
+                "{} directory does not exist. Run 'rd init' first.",
+                style("FAIL").red().bold()
+            )?;
+            return Ok(());
+        }
+        writeln!(w, "{} directory exists", style("PASS").green().bold())?;
+
+        if report.lock_ok {
+            writeln!(w, "{} lock is free", style("PASS").green().bold())?;
+        } else {
+            writeln!(
+                w,
+                "{} {}",
+                style("WARN").yellow().bold(),
+                report
+                    .lock_message
+                    .as_deref()
+                    .unwrap_or("lock check failed")
+            )?;
+        }
+
+        let parse_status = if report.parse_errors.is_empty() {
+            style("PASS").green().bold()
+        } else {
+            style("FAIL").red().bold()
+        };
+        writeln!(
+            w,
+            "{parse_status} {} goal(s), {} task(s) checked",
+            report.goals_checked, report.tasks_checked,
+        )?;
+        for issue in &report.parse_errors {
+            match &issue.path {
+                Some(path) => writeln!(
+                    w,
+                    "  {} {path}: {}",
+                    style("parse error:").red(),
+                    issue.message
+                )?,
+                None => writeln!(w, "  {} {}", style("parse error:").red(), issue.message)?,
+            }
+        }
+
+        if report.orphaned_refs.is_empty() {
+            writeln!(w, "{} no orphaned references", style("PASS").green().bold())?;
+        } else {
+            writeln!(
+                w,
+                "{} orphaned references found:",
+                style("FAIL").red().bold()
+            )?;
+            for issue in &report.orphaned_refs {
+                writeln!(w, "  {}", issue.message)?;
+            }
+        }
+
+        writeln!(w, "radial-core version: {}", report.radial_version)?;
+        writeln!(w)?;
+        if report.healthy() {
+            writeln!(w, "{}", style("Everything looks healthy.").green().bold())?;
+        } else {
+            writeln!(w, "{}", style("Problems found -- see above.").red().bold())?;
+        }
+        Ok(())
+    })
+}
+
 // -- Helpers --
 
 /// Write a labeled field: `{label}  {value}` with consistent alignment.

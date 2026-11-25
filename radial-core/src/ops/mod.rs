@@ -4,6 +4,8 @@
 pub mod clean;
 /// Replace a completed or failed task's heavy fields with a summary.
 pub mod compact;
+/// Point-in-time health check of a `.radial/` directory.
+pub mod doctor;
 /// Update a goal's or task's description, priority, contract, or dependencies.
 pub mod edit;
 /// Create, list, and cancel goals.
