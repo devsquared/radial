@@ -158,6 +158,17 @@ pub enum Commands {
         shell: Shell,
     },
 
+    /// Point-in-time health check of the `.radial/` directory
+    ///
+    /// Checks that it exists, that the write lock is free, that every
+    /// goal/task file parses, and that no goal/task reference is dangling.
+    /// Exits non-zero if any problem is found.
+    Doctor {
+        /// Output as JSON
+        #[arg(long)]
+        json: bool,
+    },
+
     /// Run radial as an MCP (Model Context Protocol) server over stdio
     ///
     /// Requires an already-initialized `.radial/` directory in the current

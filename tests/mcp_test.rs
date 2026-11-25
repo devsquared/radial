@@ -274,3 +274,16 @@ fn test_mcp_allow_tool_scopes_visible_and_callable_tools() {
         "an allowed tool must succeed, got {allowed:?}"
     );
 }
+
+#[test]
+fn test_mcp_doctor_reports_healthy_on_a_fresh_init() {
+    let mut session = McpSession::start(&[]);
+
+    let report = session.call_ok("doctor", &json!({}));
+    assert_eq!(report["exists"], true);
+    assert_eq!(report["lock_ok"], true);
+    assert_eq!(report["goals_checked"], 0);
+    assert_eq!(report["tasks_checked"], 0);
+    assert_eq!(report["parse_errors"], json!([]));
+    assert_eq!(report["orphaned_refs"], json!([]));
+}

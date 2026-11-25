@@ -31,6 +31,7 @@ Task orchestration for LLM agents. Break down goals into tracked, contract-bound
 - **Task-driven memory** — goals and tasks persist across sessions, giving agents durable context for long-running workflows
 - **Agent onboarding** — `rd prep` outputs a usage guide you can drop straight into a prompt
 - **MCP server** — `rd mcp` exposes the same operations as MCP tools over stdio, plus `get_my_work` for finding the next unblocked task in one call; `--allow-tool` scopes a session to a subset
+- **Health check** — `rd doctor` catches a missing directory, a stuck lock, an unparseable file, or a dangling goal/task reference in one pass, with a non-zero exit code for scripting
 
 ## Overview
 
@@ -174,6 +175,12 @@ walkthrough aimed at agents. Almost every command also accepts `--json` for mach
 |---------|-------------|
 | `rd compact analyze [--goal <id>]` | List tasks eligible for compaction |
 | `rd compact apply <task-id> --summary <text>` | Replace a completed/failed task's detailed history with a summary |
+
+#### Diagnostics
+
+| Command | Description |
+|---------|-------------|
+| `rd doctor` | Point-in-time health check: `.radial/` exists, the write lock is free, every goal/task file parses, no dangling goal/task reference. Exits non-zero if anything's wrong |
 
 #### Agent onboarding
 

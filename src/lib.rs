@@ -31,6 +31,16 @@ pub(crate) fn get_radial_path() -> Option<PathBuf> {
     radial_core::resolve_radial_dir(&current_dir)
 }
 
+/// Resolves the directory `rd doctor` should check -- unlike every other
+/// command, it must not refuse to run just because `.radial/` isn't there;
+/// "it's missing, run `rd init`" is itself a useful thing for it to report.
+/// Falls back to `<cwd>/.radial` when nothing is found.
+pub(crate) fn radial_dir_for_doctor() -> Result<PathBuf> {
+    let current_dir = std::env::current_dir().context("Failed to get current directory")?;
+    Ok(radial_core::resolve_radial_dir(&current_dir)
+        .unwrap_or_else(|| current_dir.join(radial_core::RADIAL_DIR)))
+}
+
 /// Parses a list of raw ID strings (which may themselves be comma- or
 /// whitespace-separated) into `TaskId` values.
 fn parse_blocked_by(raw: Option<Vec<String>>, db: &Database) -> Result<Option<Vec<TaskId>>> {
@@ -667,6 +677,16 @@ fn run(cli: Cli) -> Result<()> {
         Commands::Completions { shell } => {
             clap_complete::generate(shell, &mut Cli::command(), BIN_NAME, &mut std::io::stdout());
             Ok(())
+        }
+        Commands::Doctor { json } => {
+            let report = ops::doctor::run(&radial_dir_for_doctor()?);
+            let healthy = report.healthy();
+            output::doctor(&report, &RenderOptions::new().json(json))?;
+            if healthy {
+                Ok(())
+            } else {
+                std::process::exit(1);
+            }
         }
         Commands::Mcp { allow_tool } => {
             let allowed_tools = (!allow_tool.is_empty()).then(|| allow_tool.into_iter().collect());
